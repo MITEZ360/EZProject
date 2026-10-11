@@ -298,6 +298,7 @@ export type Dialect = 'sqlite' | 'postgres' | 'mysql';
 export interface StorageDriver {
   readonly dialect: Dialect;
   migrate(): Promise<void>;
+  /** 事务可重入：fn 内再次 transaction() 加入当前事务（SAVEPOINT），由最外层提交 */
   transaction<T>(fn: (tx: StorageTx) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
@@ -305,6 +306,8 @@ export interface StorageDriver {
 export interface StorageTx {
   find<T>(spec: QuerySpec): Promise<T[]>;
   findOne<T>(spec: QuerySpec): Promise<T | null>;
+  /** 分页统计必须用它（SQL COUNT），禁止 find 后取 length */
+  count(spec: QuerySpec): Promise<number>;
   insert<T>(table: string, data: T): Promise<T>;
   update<T>(table: string, id: string, patch: Partial<T>): Promise<T>;
   delete(table: string, id: string): Promise<void>;
@@ -320,6 +323,8 @@ export interface QuerySpec {
 ```
 
 > **注意**：契约里**没有**任何 SQL、表名、方言字样。数据库是"实现细节"，通过策略模式隔离。
+>
+> **事务语义（v1.1 定死）**：① `transaction(fn)` 全有或全无；② **可重入**——fn 内再开事务是加入当前事务（方言可用 SAVEPOINT），不报错、不新开；③ 驱动层错误必须收敛为平台错误码（如 `E_CONFLICT`），方言错误码（SqliteError 等）不得泄漏给上层。
 
 ### 4.4 内容能力契约
 

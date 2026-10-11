@@ -114,4 +114,42 @@ describe('内容层：存结构不存 HTML', () => {
     expect(found?.data['title']).toBe('t');
     await app.stop();
   });
+
+  it('方法解构后调用依然安全（不依赖 this）', async () => {
+    const app = await createBlogApp({ dialect: 'sqlite', url: ':memory:' });
+    const content = app.registry.require<ContentService>(Tokens.Content);
+    const created = await content.create({
+      type: 'posts',
+      tenantId: 'tenant01',
+      data: { title: 't', slug: 's', body: [] },
+      actor: { id: 'u1', tenantId: 'tenant01', kind: 'user' },
+    });
+    const { update, remove, findOne } = content; // Hono handler 常见用法
+    const updated = await update(created.id, {
+      tenantId: 'tenant01',
+      data: { title: 't2' },
+      actor: { id: 'u1', tenantId: 'tenant01', kind: 'user' },
+    });
+    expect(updated.data['title']).toBe('t2');
+    await remove(created.id, 'tenant01', { id: 'u1', tenantId: 'tenant01', kind: 'user' });
+    expect(await findOne(created.id, 'tenant01')).toBeNull();
+    await app.stop();
+  });
+
+  it('find 的 total 与 items 同视图：limit 截断时 total 不变', async () => {
+    const app = await createBlogApp({ dialect: 'sqlite', url: ':memory:' });
+    const content = app.registry.require<ContentService>(Tokens.Content);
+    for (let i = 1; i <= 5; i++) {
+      await content.create({
+        type: 'posts',
+        tenantId: 'tenant01',
+        data: { title: `t${i}`, slug: `s${i}`, body: [] },
+        actor: { id: 'u1', tenantId: 'tenant01', kind: 'user' },
+      });
+    }
+    const page = await content.find({ tenantId: 'tenant01', type: 'posts', limit: 2 });
+    expect(page.items).toHaveLength(2);
+    expect(page.total).toBe(5); // 计数不被 limit 截断，且与 items 同一事务视图
+    await app.stop();
+  });
 });
