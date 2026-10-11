@@ -10,6 +10,10 @@ import type { DomainEvent } from '@kernel/events/types.js';
 import { newId } from '@kernel/primitives/id.js';
 import { Tokens } from '@kernel/registry.js';
 
+// 时间戳列**必须用 BIGINT 而非 INTEGER**：epoch 毫秒是 13 位数字，超出 PG 的
+// INTEGER（32 位）范围。SQLite 的 BIGINT 与 INTEGER 亲和性相同，无副作用。
+// （这是"模块私有表硬编码物理类型"的已知遗留——正确做法是由存储层翻译逻辑类型，
+//   见 dev-log 遗留项。）
 const DDL = `
 CREATE TABLE IF NOT EXISTS audit_logs (
   id          TEXT PRIMARY KEY,
@@ -17,7 +21,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   event       TEXT NOT NULL,
   actor_id    TEXT NOT NULL,
   detail      TEXT NOT NULL,        -- JSON
-  occurred_at INTEGER NOT NULL      -- epoch ms
+  occurred_at BIGINT NOT NULL       -- epoch ms
 );
 CREATE INDEX IF NOT EXISTS ix_audit_tenant_time ON audit_logs (tenant_id, occurred_at DESC);
 `;

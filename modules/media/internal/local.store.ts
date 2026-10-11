@@ -7,15 +7,17 @@ import { join } from 'node:path';
 import type { Asset, AssetStore } from '@kernel/contracts/asset.contract.js';
 import type { StorageDriver } from '@kernel/contracts/storage.contract.js';
 
+// size / created_at 用 BIGINT：资产可超 2GB、时间戳是 epoch 毫秒（均超出 PG 的
+// INTEGER(32 位) 范围）。SQLite 下 BIGINT 与 INTEGER 亲和性相同。
 export const MEDIA_DDL = `
 CREATE TABLE IF NOT EXISTS assets (
   id           TEXT PRIMARY KEY,
   tenant_id    TEXT NOT NULL,
   filename     TEXT NOT NULL,
   content_type TEXT NOT NULL,
-  size         INTEGER NOT NULL,
+  size         BIGINT NOT NULL,
   meta         TEXT NOT NULL,   -- JSON
-  created_at   INTEGER NOT NULL
+  created_at   BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_assets_tenant ON assets (tenant_id, created_at DESC);
 `;

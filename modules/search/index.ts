@@ -1,6 +1,9 @@
 // modules/search/index.ts
 // 全文检索模块（通用能力）。
-// 契约见 kernel/contracts/search.contract.ts（引擎无关）；本模块提供 SQLite FTS5 策略。
+// 契约见 kernel/contracts/search.contract.ts（引擎无关）；本模块提供多方言检索策略：
+//   sqlite   → FTS5 虚拟表 + bm25
+//   postgres → tsvector/tsquery + GIN + ts_rank（均为 PG 内置，零扩展依赖）
+// 两者语义经探针实测对齐（短语相邻匹配），故契约测试可参数化跑两方言。
 //
 // 索引同步：订阅 content 的领域事件（宪法三——只听事件名，不 import content 实现；
 // 回查实体经内核 ContentService 契约）。事件总线 publish 会 await 订阅者，
@@ -15,17 +18,23 @@ import type { ContentService } from '@kernel/contracts/content.contract.js';
 import type { StorageDriver } from '@kernel/contracts/storage.contract.js';
 import type { DomainEvent } from '@kernel/events/types.js';
 import { Tokens } from '@kernel/registry.js';
-import { SEARCH_DDL, createSqliteSearch } from './internal/sqlite-fts.js';
+import { SQLITE_SEARCH_DDL, createSqliteSearch } from './internal/sqlite-fts.js';
+import { POSTGRES_SEARCH_DDL, createPostgresSearch } from './internal/postgres-fts.js';
 
 export interface SearchModuleOptions {
   /**
    * 检索策略；默认 'auto'（按存储方言自动选择）。
-   * 当前仅 sqlite 方言有实现（FTS5）——FTS5 是 SQLite 专有扩展，
-   * 其他方言需各自实现检索策略（如 PG 的 tsvector），届时加进下面的策略表。
+   * 显式指定主要用于测试或覆盖默认策略。
    */
-  provider?: 'auto' | 'sqlite-fts5';
+  provider?: 'auto' | 'sqlite-fts5' | 'postgres-fts';
   /** 启动时索引为空则自动全量构建，默认 true */
   autoIndexOnEmpty?: boolean;
+}
+
+interface SearchStrategy {
+  /** 建表语句（逐条执行，整体一个事务） */
+  ddl: string[];
+  create: (driver: StorageDriver) => SearchProvider;
 }
 
 /**
@@ -35,18 +44,30 @@ export interface SearchModuleOptions {
  *  2. 天然不触发 check-no-dialect 扫描——方言判断收敛在策略表，而非业务逻辑
  * 表中没有的方言 = 暂无实现 → 不注册能力（服务照常启动）。
  */
-const SEARCH_STRATEGIES: Record<string, (driver: StorageDriver) => SearchProvider> = {
-  sqlite: (driver) => createSqliteSearch(driver),
+const SEARCH_STRATEGIES: Record<string, SearchStrategy> = {
+  sqlite: { ddl: SQLITE_SEARCH_DDL, create: createSqliteSearch },
+  postgres: { ddl: POSTGRES_SEARCH_DDL, create: createPostgresSearch },
+};
+
+/** 显式 provider 名 → 策略表 key（避免嵌套三元） */
+const PROVIDER_KEYS: Record<string, string> = {
+  'sqlite-fts5': 'sqlite',
+  'postgres-fts': 'postgres',
 };
 
 /** 全量遍历的批大小 */
 const REINDEX_BATCH = 200;
 
+/**
+ * 索引表是否已有数据。
+ * 用 `SELECT 1 ... LIMIT 1` 而非 `count(*)`：存在性判断无需计数，
+ * 且避开 PG 的 count 返回 bigint（驱动会给字符串）这一类型陷阱。
+ */
 async function hasAnyIndex(driver: StorageDriver): Promise<boolean> {
   const rows = await driver.transaction((tx) =>
-    tx.query<{ n: number }>('SELECT count(*) AS n FROM search_index')
+    tx.query('SELECT 1 AS one FROM search_index LIMIT 1')
   );
-  return (rows[0]?.n ?? 0) > 0;
+  return rows.length > 0;
 }
 
 /** 全量重建某租户的索引（分页遍历所有类型的所有条目） */
@@ -82,9 +103,10 @@ export function searchModule(options: SearchModuleOptions = {}): PlatformModule 
       const content = registry.require<ContentService>(Tokens.Content);
 
       // 策略选择：显式指定优先，否则按存储方言查表
-      const key = options.provider === 'sqlite-fts5' ? 'sqlite' : driver.dialect;
-      const make = SEARCH_STRATEGIES[key];
-      if (!make) {
+      const key =
+        (options.provider && PROVIDER_KEYS[options.provider]) ?? driver.dialect;
+      const strategy = SEARCH_STRATEGIES[key];
+      if (!strategy) {
         // 未实现的方言：**不注册能力**（服务照常启动；/api/v1/search 返回 404），
         // 而不是让整个 bootstrap 崩掉——搜索是可选能力，不该阻断主流程。
         console.warn(
@@ -93,10 +115,14 @@ export function searchModule(options: SearchModuleOptions = {}): PlatformModule 
         return;
       }
 
-      // 私有表：FTS5 虚拟表（DDL 经契约允许的原生通道）
-      await driver.transaction((tx) => tx.exec(SEARCH_DDL));
+      // 私有表：DDL 经契约允许的原生通道（整体一个事务，建表与索引原子生效）
+      await driver.transaction(async (tx) => {
+        for (const stmt of strategy.ddl) {
+          await tx.exec(stmt);
+        }
+      });
 
-      const provider = make(driver);
+      const provider = strategy.create(driver);
       registry.provide<SearchProvider>(Tokens.Search, provider);
 
       const tenantId = (config['tenantId'] as string | undefined) ?? 'default';

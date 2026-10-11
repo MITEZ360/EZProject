@@ -4,6 +4,9 @@
 //
 // 表为**模块私有表**：读写一律经 StorageTx 的 exec/query（契约允许的原生通道），
 // 因为 FTS5 的 MATCH 无法用 QuerySpec 表达。
+//
+// 方言相关的只有三处：DDL、MATCH 语法（`"a b"`）、排序函数（bm25）。
+// 索引内容与 filter 白名单等方言无关部分见 document.ts。
 
 import type { StorageDriver, StorageTx } from '@kernel/contracts/storage.contract.js';
 import type {
@@ -11,11 +14,28 @@ import type {
   SearchQuery,
   SearchResult,
 } from '@kernel/contracts/search.contract.js';
-import { toMatchExpr, tokenize } from './tokenize.js';
+import { FILTERABLE, parsePayload, searchableText } from './document.js';
+import { tokenizeList } from './tokenize.js';
 
 const TABLE = 'search_index';
 
-export const SEARCH_DDL = `
+/**
+ * 查询文本 → FTS5 MATCH 表达式（**短语**：token 必须相邻）。
+ * 用 phrase 而非 AND：中文搜「世界」若拆成 `"世" AND "界"` 会命中「世…界」这类
+ * 不相邻文本，噪音过大；短语语义符合「搜什么就匹配什么」的直觉。
+ *
+ * PG 侧的对应实现见 postgres-fts.ts 的 toTsQuery（`世 <-> 界`），两者语义经探针
+ * 实测对齐：相邻命中、不相邻不命中、逆序不命中。
+ *
+ * 无需转义：token 由 tokenizeList 保证只含汉字/字母/数字。
+ */
+export function toMatchExpr(text: string): string {
+  const tokens = tokenizeList(text);
+  return tokens.length ? `"${tokens.join(' ')}"` : '';
+}
+
+export const SQLITE_SEARCH_DDL: string[] = [
+  `
 CREATE VIRTUAL TABLE IF NOT EXISTS ${TABLE} USING fts5(
   doc_id    UNINDEXED,
   set_name  UNINDEXED,
@@ -24,50 +44,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS ${TABLE} USING fts5(
   payload   UNINDEXED,
   body
 );
-`;
-
-/** 元数据字段不参与全文检索（它们在 payload 里保留，只是不进索引） */
-const SKIP_KEYS = new Set([
-  'id', 'tenantId', 'type', 'slug', 'locale', 'status',
-  'createdAt', 'updatedAt', 'deletedAt',
-]);
-
-/** filter 允许的列白名单（列名直接拼 SQL，必须白名单化） */
-const FILTERABLE = new Set(['status', 'set_name', 'doc_id']);
+`,
+];
 
 interface HitRow {
   doc_id: string;
   payload: string;
   score: number;
 }
-
-/** 递归收集可检索文本：字符串入索引；数字/布尔不入（范围类查询应走 filter） */
-function collectText(value: unknown, out: string[], depth = 0): void {
-  if (depth > 8) return; // 防深递归（component 嵌套限 3，但 json 字段可能更深）
-  if (typeof value === 'string') {
-    if (value) out.push(value);
-    return;
-  }
-  if (value === null || typeof value === 'number' || typeof value === 'boolean') return;
-  if (Array.isArray(value)) {
-    for (const v of value) collectText(v, out, depth + 1);
-    return;
-  }
-  if (typeof value === 'object') {
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (SKIP_KEYS.has(k)) continue;
-      collectText(v, out, depth + 1);
-    }
-  }
-}
-
-const safeParse = (s: string): Record<string, unknown> => {
-  try {
-    return JSON.parse(s) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-};
 
 const DELETE_BY_DOC = `DELETE FROM ${TABLE} WHERE rowid IN (SELECT rowid FROM ${TABLE} WHERE doc_id = ? AND set_name = ?)`;
 
@@ -79,8 +63,6 @@ export function createSqliteSearch(driver: StorageDriver): SearchProvider {
     id: string,
     document: Record<string, unknown>
   ): Promise<void> => {
-    const parts: string[] = [];
-    collectText(document, parts);
     await tx.exec(DELETE_BY_DOC, [id, setName]);
     await tx.exec(
       `INSERT INTO ${TABLE} (doc_id, set_name, tenant_id, status, payload, body) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -90,7 +72,7 @@ export function createSqliteSearch(driver: StorageDriver): SearchProvider {
         String(document['tenantId'] ?? ''),
         String(document['status'] ?? ''),
         JSON.stringify(document),
-        tokenize(parts.join(' ')),
+        searchableText(document),
       ]
     );
   };
@@ -131,9 +113,10 @@ export function createSqliteSearch(driver: StorageDriver): SearchProvider {
 
       // 同事务取「结果 + 总数」，保证两者一致（与 content.find 同一纪律）
       return driver.transaction(async (tx) => {
+        // 次级排序 doc_id：同分时顺序确定，避免契约测试与分页抖动
         const rows = await tx.query<HitRow>(
           `SELECT doc_id, payload, bm25(${TABLE}) AS score FROM ${TABLE}
-           WHERE ${clause} ORDER BY bm25(${TABLE}) LIMIT ? OFFSET ?`,
+           WHERE ${clause} ORDER BY bm25(${TABLE}), doc_id LIMIT ? OFFSET ?`,
           [...params, query.limit ?? 20, query.offset ?? 0]
         );
         const counted = await tx.query<{ n: number }>(
@@ -144,7 +127,7 @@ export function createSqliteSearch(driver: StorageDriver): SearchProvider {
           hits: rows.map((r) => ({
             id: r.doc_id,
             score: -r.score, // bm25 越小越相关 → 取负，使契约里"分数越大越相关"
-            document: safeParse(r.payload) as T,
+            document: parsePayload(r.payload) as T,
           })),
           total: counted[0]?.n ?? 0,
         };

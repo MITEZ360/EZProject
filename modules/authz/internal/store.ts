@@ -27,6 +27,23 @@ export interface RoleRow {
   updatedAt: number;
 }
 
+/**
+ * 布尔列落库为 0/1。
+ * PG 是强类型：整数列**拒绝** JS boolean（`column "builtin" is of type integer
+ * but expression is of type boolean`），而 SQLite 会静默转成 0/1——
+ * 不做转换就只在 PG 上炸。转换收敛在落库边界，调用方保持 boolean 语义。
+ */
+const toDbRole = (row: RoleRow): Record<string, unknown> => ({
+  ...row,
+  builtin: row.builtin ? 1 : 0,
+});
+
+const toDbPatch = (patch: Partial<RoleRow>): Record<string, unknown> => {
+  const out: Record<string, unknown> = { ...patch };
+  if (typeof out['builtin'] === 'boolean') out['builtin'] = out['builtin'] ? 1 : 0;
+  return out;
+};
+
 export interface RefreshRow {
   id: string;
   userId: string;
@@ -37,6 +54,10 @@ export interface RefreshRow {
   createdAt: number;
 }
 
+// 时间戳一律 BIGINT（epoch 毫秒超出 PG INTEGER(32 位)；SQLite 下等价）。
+// builtin 保持 INTEGER：布尔落库为 0/1，三方言一致
+//   （PG 的既不是 BOOLEAN 也不是 INTEGER——契约 6.5 的 bool 映射是 BOOLEAN，
+//    此处为最小修复采用数字，见 dev-log 遗留项）。
 const DDL = `
 CREATE TABLE IF NOT EXISTS auth_users (
   id            TEXT PRIMARY KEY,
@@ -46,8 +67,8 @@ CREATE TABLE IF NOT EXISTS auth_users (
   password_hash TEXT NOT NULL,
   roles         TEXT NOT NULL,   -- JSON string[]
   status        TEXT NOT NULL,
-  created_at    INTEGER NOT NULL,
-  updated_at    INTEGER NOT NULL
+  created_at    BIGINT NOT NULL,
+  updated_at    BIGINT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_auth_users_email ON auth_users (tenant_id, email);
 CREATE TABLE IF NOT EXISTS auth_roles (
@@ -56,9 +77,9 @@ CREATE TABLE IF NOT EXISTS auth_roles (
   slug        TEXT NOT NULL,
   name        TEXT NOT NULL,
   permissions TEXT NOT NULL,     -- JSON
-  builtin     INTEGER NOT NULL,
-  created_at  INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL
+  builtin     INTEGER NOT NULL,  -- 0/1
+  created_at  BIGINT NOT NULL,
+  updated_at  BIGINT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_auth_roles_slug ON auth_roles (tenant_id, slug);
 CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
@@ -66,9 +87,9 @@ CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
   user_id    TEXT NOT NULL,
   tenant_id  TEXT NOT NULL,
   token_hash TEXT NOT NULL,
-  expires_at INTEGER NOT NULL,
-  revoked_at INTEGER NOT NULL,   -- 0 = 有效
-  created_at INTEGER NOT NULL
+  expires_at BIGINT NOT NULL,
+  revoked_at BIGINT NOT NULL,   -- 0 = 有效
+  created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_auth_refresh_hash ON auth_refresh_tokens (token_hash);
 `;
@@ -131,11 +152,11 @@ export const store = {
   },
 
   async insertRole(driver: StorageDriver, row: RoleRow): Promise<void> {
-    await driver.transaction((tx) => tx.insert('auth_roles', row));
+    await driver.transaction((tx) => tx.insert('auth_roles', toDbRole(row)));
   },
 
   async updateRole(driver: StorageDriver, id: string, patch: Partial<RoleRow>): Promise<void> {
-    await driver.transaction((tx) => tx.update('auth_roles', id, patch));
+    await driver.transaction((tx) => tx.update('auth_roles', id, toDbPatch(patch)));
   },
 
   async deleteRole(driver: StorageDriver, id: string): Promise<void> {
