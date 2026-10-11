@@ -9,11 +9,13 @@ import { api, authApi, getToken, hasSession, setToken } from './lib/api';
 import ContentView from './ContentView';
 import TypesView from './TypesView';
 import AuditView from './AuditView';
+import UsersView from './UsersView';
+import RolesView from './RolesView';
 import SettingsView from './SettingsView';
 
 export default function App() {
   const [authed, setAuthed] = useState(false);
-  const [view, setView] = useState<'entries' | 'types' | 'audit' | 'settings'>('entries');
+  const [view, setView] = useState<'entries' | 'types' | 'audit' | 'settings' | 'users' | 'roles'>('entries');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -94,6 +96,8 @@ export default function App() {
             { key: 'entries', label: '内容' },
             { key: 'types', label: '类型管理' },
             { key: 'audit', label: '审计日志' },
+            { key: 'users', label: '用户管理' },
+            { key: 'roles', label: '角色权限' },
             { key: 'settings', label: '系统设置' },
           ]}
           onClick={({ key }) => setView(key as typeof view)}
@@ -102,6 +106,8 @@ export default function App() {
       <Layout.Content style={{ padding: 24 }}>
         {view === 'types' && <TypesView />}
         {view === 'audit' && <AuditView />}
+        {view === 'users' && <UsersView />}
+        {view === 'roles' && <RolesView />}
         {view === 'settings' && <SettingsView />}
         {view === 'entries' && <ContentView />}
       </Layout.Content>

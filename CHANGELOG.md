@@ -13,6 +13,12 @@
 - **管理端归位**：`scenarios/blog/admin` → `scenarios/generic-cms/admin`（通用 CMS 管理端）；内容视图按类型定义动态渲染（零写死字段），App 壳零业务词汇；博客场景复用通用 admin、仅保留类型种子
 
 ### Added
+- **`modules/media`（媒体资产）**：AssetStore 策略（local 文件系统已实现，s3 预留）；防路径穿越；公开下载 + 长缓存；内容只存 asset id
+- **`modules/cache`（缓存）**：CacheProvider 策略（memory/none 已实现，redis 预留）；Content API 读路径接入 + 写操作事件驱动失效
+- **多语言回退**：实体级 locale，指定语言无结果回退 default
+- **PT → HTML 渲染器**（`modules/content/render`）：结构 + 行内 marks + 全量转义（XSS 安全）
+- **博客前台**（`scenarios/blog/front`）：SSR 列表/详情页，渲染产物不落库；`make build-blog` 产出前台+API+后台一体交付物
+- **后台管理页**：用户管理、角色权限（资源×动作×字段级 scope）、媒体上传（共 7 个视图）
 - **`modules/authz`（身份与权限）**：JWT 访问令牌（HMAC-SHA256，零依赖）+ **可撤销/轮换刷新令牌**（重放触发全量撤销）；RBAC（角色→权限点，`*` 通配）+ scope（字段级 `deniedFields` 剥离）；用户/角色管理；scrypt 口令哈希 + 恒定时间比较
 - **HTTP 认证**：`/auth/login|refresh|logout|bootstrap|me`；守卫链 JWT → 引导令牌 → 场景守卫；写操作鉴权（403）
 - **admin**：邮箱密码登录 + 令牌自动刷新

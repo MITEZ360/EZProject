@@ -454,3 +454,36 @@ engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/ed
 - [ ] blog 场景前台展示（专用场景示例）
 
 ---
+
+## 2026-10-11 · 阶段二收尾 + 博客前台 + 后台管理页（分支 `feature/phase2-media-cache`）
+
+**三块内容一次做完**：
+
+**③ 阶段二能力**
+- **媒体**：内核 `asset.contract`（AssetStore 策略）+ `modules/media`（**local 文件系统策略**已实现，s3 预留）；
+  文件落 `<root>/<tenantId>/<id>`、元信息落私有表；**防路径穿越**（id/tenantId 白名单正则）；
+  Content API 提供公开下载（`immutable` 长缓存）；内容只存 asset id（铁律）
+- **缓存**：内核 `cache.contract`（CacheProvider 策略）+ `modules/cache`（memory / none 已实现，redis 预留）；
+  Content API 读路径接入（命中回 `x-cache: HIT`），**写操作事件驱动失效**（内容变更 → `invalidate('content:<tenant>')`）
+- **多语言回退**：实体级 locale，`find` 在指定 locale 无结果时**回退 default**（有 zh 版本则优先 zh）
+
+**② 博客前台（专用场景展示层）**
+- `modules/content/render/pt-to-html.ts`：PT → HTML 渲染器（模块层通用工具，纯函数）；
+  覆盖 h1-h3 / 引用 / 无序列表 / strong·em·code·link；**全量 HTML 转义**（XSS 测试通过）
+- `scenarios/blog/front`：SSR 页面（首页列表 + 文章详情），**每次请求从结构再生**——渲染产物不落库的铁律在展示层兑现
+- `Makefile build-blog`：产出 `dist/blog.mjs`（= 前台 + API + 后台，一份交付物三种消费方式）
+
+**① 后台管理页**
+- **用户管理**：列表/新建/改角色/重置密码/禁用（禁用与改密提示"会话已撤销"）
+- **角色权限**：权限点编辑（资源 × 动作 × 字段级 scope），内置角色不可改
+- **媒体上传**：media 字段旁直接上传，自动回填 asset id
+- 后台现共 **7 个视图**：内容 / 类型 / 审计 / 用户 / 角色 / 设置 / 登录
+
+**验证**：
+- 全套 **127/127**（新增 pt-to-html 5、phase2 6、blog-front 3）
+- 冒烟（`dist/blog.mjs` 单进程）：前台首页 200 → 引导 201 → 上传媒体 → 发文（含 media 引用 + PT）201 →
+  **前台列表/详情渲染正确** → 缓存 MISS→HIT → 审计/设置/用户/角色/类型/资产 端点全 200 → 后台 200
+
+**过程中的两次"设计正确性"验证**：未知字段 `cover` 被拒（类型系统生效）、博客后台缺 audit/settings（已补齐装配）。
+
+---

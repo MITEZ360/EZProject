@@ -18,12 +18,13 @@ import {
   Typography,
   message,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
   ApiError,
   api,
   apiTypes,
+  assetsApi,
   type EntryItem,
   type EntityTypeDef,
   type FieldDef,
@@ -214,7 +215,32 @@ export default function ContentView() {
       case 'relation':
         return <Input value={(v as string) ?? ''} onChange={(e) => set(e.target.value)} placeholder="目标条目 ID" />;
       case 'media':
-        return <Input value={(v as string) ?? ''} onChange={(e) => set(e.target.value)} placeholder="资产 ID" />;
+        return (
+          <Space.Compact style={{ width: '100%' }}>
+            <Input value={(v as string) ?? ''} onChange={(e) => set(e.target.value)} placeholder="资产 ID" />
+            <Button
+              icon={<UploadOutlined />}
+              onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.onchange = async () => {
+                  const file = input.files?.[0];
+                  if (!file) return;
+                  try {
+                    const asset = await assetsApi.upload(file);
+                    set(asset.id);
+                    void message.success(`已上传：${asset.filename}`);
+                  } catch (e) {
+                    void message.error(e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
+                  }
+                };
+                input.click();
+              }}
+            >
+              上传
+            </Button>
+          </Space.Compact>
+        );
       case 'json':
       case 'component':
         return (
