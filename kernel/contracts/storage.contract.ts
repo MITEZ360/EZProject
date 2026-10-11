@@ -42,10 +42,20 @@ export interface StorageTx {
   delete(table: string, id: string): Promise<void>;
 }
 
+/** 模块私有表的结构声明（列名映射 + JSON 列），语义同驱动内置表 */
+export interface TableSchema {
+  /** 应用对象键 → 物理列名（如 tenantId → tenant_id）；未声明的键按原样使用 */
+  columns?: Record<string, string>;
+  /** JSON 列（写入序列化 / 读取解析；其余列原样） */
+  jsonColumns?: string[];
+}
+
 export interface StorageDriver {
   readonly dialect: Dialect;
   migrate(): Promise<void>;
   /** 语义见文件头"事务语义"；实现必须支持重入 */
   transaction<T>(fn: (tx: StorageTx) => Promise<T>): Promise<T>;
+  /** 模块私有表登记（模块 setup 建 DDL 后调用；未登记的表禁止读写——防拼错表名） */
+  registerTable(name: string, schema: TableSchema): void;
   close(): Promise<void>;
 }

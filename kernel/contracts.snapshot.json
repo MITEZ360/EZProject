@@ -35,6 +35,7 @@
     "export interface QuerySpec {",
     "export interface QueryFilter {",
     "export interface StorageTx {",
+    "export interface TableSchema {",
     "export interface StorageDriver {"
   ],
   "kernel/primitives/entity.ts": [
