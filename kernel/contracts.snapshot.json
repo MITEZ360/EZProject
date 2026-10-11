@@ -51,6 +51,10 @@
     "export interface QueryFilter {",
     "export interface StorageTx {",
     "export interface TableSchema {",
+    "export type PortableColumnType = 'text' | 'int' | 'json' | 'timestamp' | 'bool';",
+    "export interface ColumnDef {",
+    "export interface IndexDef {",
+    "export interface TableDef {",
     "export interface StorageDriver {"
   ],
   "kernel/primitives/entity.ts": [
