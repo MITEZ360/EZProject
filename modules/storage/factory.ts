@@ -30,12 +30,10 @@ export function createStorageDriver(cfg: StorageConfig): StorageDriver {
   return builders[cfg.dialect](cfg);
 }
 
-/** 是否已实现某方言驱动（供自检/日志使用） */
+/** 已实现的方言（供自检/日志使用；与 builders 保持一致） */
+const IMPLEMENTED: ReadonlySet<Dialect> = new Set<Dialect>(['sqlite']);
+
+/** 是否已实现某方言驱动 */
 export function isDialectAvailable(dialect: Dialect): boolean {
-  try {
-    builders[dialect];
-    return dialect === 'sqlite';
-  } catch {
-    return false;
-  }
+  return IMPLEMENTED.has(dialect);
 }
