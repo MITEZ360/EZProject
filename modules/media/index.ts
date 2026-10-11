@@ -2,7 +2,7 @@
 // 媒体模块（通用能力）：资产存取策略（local 已实现，s3 预留）。
 // 内容只存 asset id（铁律）；本模块负责二进制与元信息。
 
-import { createLocalAssetStore, MEDIA_DDL } from './internal/local.store.js';
+import { ASSETS_TABLE, createLocalAssetStore } from './internal/local.store.js';
 import type { AssetStore } from '@kernel/contracts/asset.contract.js';
 import type { PlatformModule } from '@kernel/contracts/module.contract.js';
 import type { StorageDriver } from '@kernel/contracts/storage.contract.js';
@@ -39,11 +39,7 @@ export function mediaModule(options: MediaModuleOptions = {}): PlatformModule {
     async setup({ registry }): Promise<void> {
       const provider = options.provider ?? 'local';
       const driver = registry.require<StorageDriver>(Tokens.Storage);
-      driver.registerTable('assets', {
-        columns: { tenantId: 'tenant_id', contentType: 'content_type', createdAt: 'created_at' },
-        jsonColumns: ['meta'],
-      });
-      await driver.transaction((tx) => tx.exec(MEDIA_DDL));
+      await driver.createTable(ASSETS_TABLE);
 
       registry.provide<AssetStore>(Tokens.Assets, MEDIA_STRATEGIES[provider](options, driver));
     },

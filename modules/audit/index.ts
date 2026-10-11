@@ -4,27 +4,30 @@
 // 私有表经 StorageTx.exec 创建（契约 v2：仅限模块私有表维护）。
 
 import type { PlatformModule } from '@kernel/contracts/module.contract.js';
-import type { StorageDriver } from '@kernel/contracts/storage.contract.js';
+import type { StorageDriver, TableDef } from '@kernel/contracts/storage.contract.js';
 import type { AuditEntry, AuditQuery, AuditService } from '@kernel/contracts/audit.contract.js';
 import type { DomainEvent } from '@kernel/events/types.js';
 import { newId } from '@kernel/primitives/id.js';
 import { Tokens } from '@kernel/registry.js';
 
-// 时间戳列**必须用 BIGINT 而非 INTEGER**：epoch 毫秒是 13 位数字，超出 PG 的
-// INTEGER（32 位）范围。SQLite 的 BIGINT 与 INTEGER 亲和性相同，无副作用。
-// （这是"模块私有表硬编码物理类型"的已知遗留——正确做法是由存储层翻译逻辑类型，
-//   见 dev-log 遗留项。）
-const DDL = `
-CREATE TABLE IF NOT EXISTS audit_logs (
-  id          TEXT PRIMARY KEY,
-  tenant_id   TEXT NOT NULL,
-  event       TEXT NOT NULL,
-  actor_id    TEXT NOT NULL,
-  detail      TEXT NOT NULL,        -- JSON
-  occurred_at BIGINT NOT NULL       -- epoch ms
-);
-CREATE INDEX IF NOT EXISTS ix_audit_tenant_time ON audit_logs (tenant_id, occurred_at DESC);
-`;
+/** 私有表声明（**声明式建表**：物理类型由存储层按方言落地，模块不写 BIGINT/TEXT） */
+const AUDIT_LOGS: TableDef = {
+  table: 'audit_logs',
+  columns: [
+    { name: 'id', type: 'text', primaryKey: true },
+    { name: 'tenant_id', type: 'text', notNull: true },
+    { name: 'event', type: 'text', notNull: true },
+    { name: 'actor_id', type: 'text', notNull: true },
+    { name: 'detail', type: 'json', notNull: true },
+    { name: 'occurred_at', type: 'timestamp', notNull: true },
+  ],
+  // 审计按租户倒序翻页（同毫秒内再由 id 次级排序，见 list）
+  indexes: [{ name: 'ix_audit_tenant_time', columns: ['tenant_id', '-occurred_at'] }],
+  schema: {
+    columns: { tenantId: 'tenant_id', actorId: 'actor_id', occurredAt: 'occurred_at' },
+    jsonColumns: ['detail'],
+  },
+};
 
 const WATCHED_EVENTS = [
   'content.entry.created',
@@ -65,11 +68,7 @@ export function auditModule(): PlatformModule {
 
     async setup({ registry, events }): Promise<void> {
       driver = registry.require<StorageDriver>(Tokens.Storage);
-      driver.registerTable('audit_logs', {
-        columns: { tenantId: 'tenant_id', actorId: 'actor_id', occurredAt: 'occurred_at' },
-        jsonColumns: ['detail'],
-      });
-      await driver.transaction(async (tx) => tx.exec(DDL));
+      await driver.createTable(AUDIT_LOGS);
 
       const record = async (event: DomainEvent): Promise<void> => {
         const payload = event.payload as { id?: string; type?: string; slug?: string; actorId?: string };

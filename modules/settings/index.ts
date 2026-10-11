@@ -1,24 +1,28 @@
 // modules/settings/index.ts
 // 系统设置模块（通用能力）：per-tenant KV 存储（值任意 JSON）。
-// 私有表 settings 经 StorageTx.exec 创建（契约 v2）。
+// 私有表 settings 经**声明式建表**创建（物理类型由存储层按方言落地）。
 
 import type { PlatformModule } from '@kernel/contracts/module.contract.js';
-import type { StorageDriver } from '@kernel/contracts/storage.contract.js';
+import type { StorageDriver, TableDef } from '@kernel/contracts/storage.contract.js';
 import type { SettingItem, SettingsService } from '@kernel/contracts/settings.contract.js';
 import { newId } from '@kernel/primitives/id.js';
 import { Tokens } from '@kernel/registry.js';
 
-// updated_at 用 BIGINT：epoch 毫秒超出 PG 的 INTEGER(32 位) 范围（SQLite 下等价）。
-const DDL = `
-CREATE TABLE IF NOT EXISTS settings (
-  id         TEXT PRIMARY KEY,
-  tenant_id  TEXT NOT NULL,
-  key        TEXT NOT NULL,
-  value      TEXT NOT NULL,        -- JSON
-  updated_at BIGINT NOT NULL       -- epoch ms
-);
-CREATE INDEX IF NOT EXISTS ix_settings_tenant ON settings (tenant_id, key);
-`;
+const SETTINGS_TABLE: TableDef = {
+  table: 'settings',
+  columns: [
+    { name: 'id', type: 'text', primaryKey: true },
+    { name: 'tenant_id', type: 'text', notNull: true },
+    { name: 'key', type: 'text', notNull: true },
+    { name: 'value', type: 'json', notNull: true },
+    { name: 'updated_at', type: 'timestamp', notNull: true },
+  ],
+  indexes: [{ name: 'ix_settings_tenant', columns: ['tenant_id', 'key'] }],
+  schema: {
+    columns: { tenantId: 'tenant_id', updatedAt: 'updated_at' },
+    jsonColumns: ['value'],
+  },
+};
 
 interface SettingRow {
   id: string;
@@ -76,11 +80,7 @@ export function settingsModule(): PlatformModule {
 
     async setup({ registry }): Promise<void> {
       driver = registry.require<StorageDriver>(Tokens.Storage);
-      driver.registerTable('settings', {
-        columns: { tenantId: 'tenant_id', updatedAt: 'updated_at' },
-        jsonColumns: ['value'],
-      });
-      await driver.transaction(async (tx) => tx.exec(DDL));
+      await driver.createTable(SETTINGS_TABLE);
       registry.provide<SettingsService>(Tokens.Settings, service);
     },
 

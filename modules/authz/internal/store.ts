@@ -1,7 +1,7 @@
 // modules/authz/internal/store.ts
 // authz 模块的私有表与数据访问（经 StorageDriver 契约；表结构在本模块登记）。
 
-import type { StorageDriver } from '@kernel/contracts/storage.contract.js';
+import type { StorageDriver, TableDef } from '@kernel/contracts/storage.contract.js';
 import type { Role } from '@kernel/contracts/identity.contract.js';
 
 export interface UserRow {
@@ -27,23 +27,6 @@ export interface RoleRow {
   updatedAt: number;
 }
 
-/**
- * 布尔列落库为 0/1。
- * PG 是强类型：整数列**拒绝** JS boolean（`column "builtin" is of type integer
- * but expression is of type boolean`），而 SQLite 会静默转成 0/1——
- * 不做转换就只在 PG 上炸。转换收敛在落库边界，调用方保持 boolean 语义。
- */
-const toDbRole = (row: RoleRow): Record<string, unknown> => ({
-  ...row,
-  builtin: row.builtin ? 1 : 0,
-});
-
-const toDbPatch = (patch: Partial<RoleRow>): Record<string, unknown> => {
-  const out: Record<string, unknown> = { ...patch };
-  if (typeof out['builtin'] === 'boolean') out['builtin'] = out['builtin'] ? 1 : 0;
-  return out;
-};
-
 export interface RefreshRow {
   id: string;
   userId: string;
@@ -54,62 +37,83 @@ export interface RefreshRow {
   createdAt: number;
 }
 
-// 时间戳一律 BIGINT（epoch 毫秒超出 PG INTEGER(32 位)；SQLite 下等价）。
-// builtin 保持 INTEGER：布尔落库为 0/1，三方言一致
-//   （PG 的既不是 BOOLEAN 也不是 INTEGER——契约 6.5 的 bool 映射是 BOOLEAN，
-//    此处为最小修复采用数字，见 dev-log 遗留项）。
-const DDL = `
-CREATE TABLE IF NOT EXISTS auth_users (
-  id            TEXT PRIMARY KEY,
-  tenant_id     TEXT NOT NULL,
-  email         TEXT NOT NULL,
-  name          TEXT NOT NULL,
-  password_hash TEXT NOT NULL,
-  roles         TEXT NOT NULL,   -- JSON string[]
-  status        TEXT NOT NULL,
-  created_at    BIGINT NOT NULL,
-  updated_at    BIGINT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_auth_users_email ON auth_users (tenant_id, email);
-CREATE TABLE IF NOT EXISTS auth_roles (
-  id          TEXT PRIMARY KEY,
-  tenant_id   TEXT NOT NULL,
-  slug        TEXT NOT NULL,
-  name        TEXT NOT NULL,
-  permissions TEXT NOT NULL,     -- JSON
-  builtin     INTEGER NOT NULL,  -- 0/1
-  created_at  BIGINT NOT NULL,
-  updated_at  BIGINT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_auth_roles_slug ON auth_roles (tenant_id, slug);
-CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
-  id         TEXT PRIMARY KEY,
-  user_id    TEXT NOT NULL,
-  tenant_id  TEXT NOT NULL,
-  token_hash TEXT NOT NULL,
-  expires_at BIGINT NOT NULL,
-  revoked_at BIGINT NOT NULL,   -- 0 = 有效
-  created_at BIGINT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS ix_auth_refresh_hash ON auth_refresh_tokens (token_hash);
-`;
+/**
+ * authz 私有表声明（**声明式建表**：物理类型由存储层按方言决定，
+ * 模块不再写 TEXT / BIGINT / INTEGER——那正是"只在某个方言上炸"的来源）。
+ *
+ * `builtin` 声明为 `bool`：SQLite 落 INTEGER(0/1)，PG 落原生 BOOLEAN（契约 6.5）。
+ */
+const TABLES: TableDef[] = [
+  {
+    table: 'auth_users',
+    columns: [
+      { name: 'id', type: 'text', primaryKey: true },
+      { name: 'tenant_id', type: 'text', notNull: true },
+      { name: 'email', type: 'text', notNull: true },
+      { name: 'name', type: 'text', notNull: true },
+      { name: 'password_hash', type: 'text', notNull: true },
+      { name: 'roles', type: 'json', notNull: true },
+      { name: 'status', type: 'text', notNull: true },
+      { name: 'created_at', type: 'timestamp', notNull: true },
+      { name: 'updated_at', type: 'timestamp', notNull: true },
+    ],
+    indexes: [{ name: 'ux_auth_users_email', columns: ['tenant_id', 'email'], unique: true }],
+    schema: {
+      columns: {
+        tenantId: 'tenant_id',
+        passwordHash: 'password_hash',
+        createdAt: 'created_at',
+        updatedAt: 'updated_at',
+      },
+      jsonColumns: ['roles'],
+    },
+  },
+  {
+    table: 'auth_roles',
+    columns: [
+      { name: 'id', type: 'text', primaryKey: true },
+      { name: 'tenant_id', type: 'text', notNull: true },
+      { name: 'slug', type: 'text', notNull: true },
+      { name: 'name', type: 'text', notNull: true },
+      { name: 'permissions', type: 'json', notNull: true },
+      { name: 'builtin', type: 'bool', notNull: true },
+      { name: 'created_at', type: 'timestamp', notNull: true },
+      { name: 'updated_at', type: 'timestamp', notNull: true },
+    ],
+    indexes: [{ name: 'ux_auth_roles_slug', columns: ['tenant_id', 'slug'], unique: true }],
+    schema: {
+      columns: { tenantId: 'tenant_id', createdAt: 'created_at', updatedAt: 'updated_at' },
+      jsonColumns: ['permissions'],
+    },
+  },
+  {
+    table: 'auth_refresh_tokens',
+    columns: [
+      { name: 'id', type: 'text', primaryKey: true },
+      { name: 'user_id', type: 'text', notNull: true },
+      { name: 'tenant_id', type: 'text', notNull: true },
+      { name: 'token_hash', type: 'text', notNull: true },
+      { name: 'expires_at', type: 'timestamp', notNull: true },
+      { name: 'revoked_at', type: 'timestamp', notNull: true }, // 0 = 有效
+      { name: 'created_at', type: 'timestamp', notNull: true },
+    ],
+    indexes: [{ name: 'ix_auth_refresh_hash', columns: ['token_hash'] }],
+    schema: {
+      columns: {
+        userId: 'user_id',
+        tenantId: 'tenant_id',
+        tokenHash: 'token_hash',
+        expiresAt: 'expires_at',
+        revokedAt: 'revoked_at',
+        createdAt: 'created_at',
+      },
+    },
+  },
+];
 
-export function registerAuthzTables(driver: StorageDriver): void {
-  driver.registerTable('auth_users', {
-    columns: { tenantId: 'tenant_id', passwordHash: 'password_hash', createdAt: 'created_at', updatedAt: 'updated_at' },
-    jsonColumns: ['roles'],
-  });
-  driver.registerTable('auth_roles', {
-    columns: { tenantId: 'tenant_id', createdAt: 'created_at', updatedAt: 'updated_at' },
-    jsonColumns: ['permissions'],
-  });
-  driver.registerTable('auth_refresh_tokens', {
-    columns: { userId: 'user_id', tenantId: 'tenant_id', tokenHash: 'token_hash', expiresAt: 'expires_at', revokedAt: 'revoked_at', createdAt: 'created_at' },
-  });
-}
-
+/** 建表（并登记表结构）。幂等，模块 setup 时调用 */
 export async function migrateAuthz(driver: StorageDriver): Promise<void> {
-  await driver.transaction(async (tx) => tx.exec(DDL));
+  for (const def of TABLES) await driver.createTable(def);
 }
 
 export const store = {
@@ -152,11 +156,11 @@ export const store = {
   },
 
   async insertRole(driver: StorageDriver, row: RoleRow): Promise<void> {
-    await driver.transaction((tx) => tx.insert('auth_roles', toDbRole(row)));
+    await driver.transaction((tx) => tx.insert('auth_roles', row));
   },
 
   async updateRole(driver: StorageDriver, id: string, patch: Partial<RoleRow>): Promise<void> {
-    await driver.transaction((tx) => tx.update('auth_roles', id, toDbPatch(patch)));
+    await driver.transaction((tx) => tx.update('auth_roles', id, patch));
   },
 
   async deleteRole(driver: StorageDriver, id: string): Promise<void> {

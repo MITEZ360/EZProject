@@ -8,6 +8,7 @@ import type {
   QuerySpec,
   StorageDriver,
   StorageTx,
+  TableDef,
   TableSchema,
 } from '@kernel/contracts/storage.contract.js';
 import {
@@ -18,6 +19,8 @@ import {
   toPhysicalRow,
   type ValueCodec,
 } from '../schema/tables.js';
+import { buildCreateTable } from '../schema/ddl.js';
+import { column } from '../schema/columns.js';
 
 export { StorageError };
 
@@ -187,6 +190,16 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
     },
   });
 
+  /**
+   * 声明式建表：DDL 由 buildCreateTable 按「逻辑类型 → SQLite 物理类型」生成，
+   * 模块不再手写物理类型（INTEGER/BIGINT/TEXT 这类知识收归存储层）。
+   * better-sqlite3 的 exec 支持多语句一次执行；语句全部 IF NOT EXISTS，幂等。
+   */
+  const applyCreateTable = async (def: TableDef): Promise<void> => {
+    if (def.schema) registry.registerTable(def.table, def.schema);
+    db.exec(buildCreateTable(def, (t) => column(t, 'col', 'sqlite').physical).join('\n'));
+  };
+
   return {
     dialect: 'sqlite' as const,
     async migrate(): Promise<void> {
@@ -195,6 +208,7 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
     registerTable(name: string, schema: TableSchema): void {
       registry.registerTable(name, schema);
     },
+    createTable: applyCreateTable,
     async transaction<T>(fn: (tx: StorageTx) => Promise<T>): Promise<T> {
       const runTx = async (): Promise<T> => {
         txDepth += 1;
