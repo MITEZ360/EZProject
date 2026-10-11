@@ -8,12 +8,19 @@ describe('id primitives', () => {
     expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
-  it('newId 时间有序：后生成的 id 字符串更大（同一毫秒内不保证，但跨毫秒成立）', async () => {
+  it('newId 时间有序：跨毫秒后生成更大', async () => {
     const a = newId();
     await new Promise((r) => setTimeout(r, 5));
     const b = newId();
-    // 前缀是时间戳，通常 b > a
     expect(b >= a).toBe(true);
+  });
+
+  it('newId 同毫秒内单调递增（审计/排序 tie-break 依赖）', () => {
+    // 同毫秒批量生成：字符串序必须等于生成顺序（rand_a 序号递增保证）
+    const ids = Array.from({ length: 200 }, () => newId());
+    const sorted = [...ids].sort();
+    expect(sorted).toEqual(ids);
+    expect(new Set(ids).size).toBe(200); // 且不重复
   });
 
   it('newId 不重复', () => {
