@@ -47,7 +47,9 @@ export function httpModule(options: HttpModuleOptions = {}): PlatformModule {
       const staticDir =
         options.staticDir ?? (config['staticDir'] as string | undefined) ?? process.env['ADMIN_STATIC_DIR'];
       // 通用管理端点惰性解析：audit/settings 由各模块自行注册（加载顺序无关）
-      const app = buildApp({ content, guard, tenantId, staticDir, registry });
+      const manageToken =
+        options.manageToken ?? (config['manageToken'] as string | undefined) ?? process.env['MANAGE_TOKEN'];
+      const app = buildApp({ content, guard, tenantId, staticDir, registry, manageToken });
       registry.provide<HttpApp>(HttpTokens.App, app);
     },
   };

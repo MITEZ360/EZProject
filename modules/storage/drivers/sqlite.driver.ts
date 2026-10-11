@@ -89,8 +89,9 @@ function toRow(table: string, data: Record<string, unknown>): Record<string, unk
   for (const [k, v] of Object.entries(data)) {
     if (v === undefined) continue;
     const phys = columns[k] ?? k;
-    // JSON 列一律 stringify（字符串值也加引号，保证读回 JSON.parse 恒成功）
-    row[phys] = jsonSet.has(k) ? JSON.stringify(v) : v;
+    // JSON 列一律 stringify（字符串值也加引号，保证读回 JSON.parse 恒成功）；
+    // 布尔按契约 6.5 落 INTEGER（SQLite 无原生 bool）
+    row[phys] = jsonSet.has(k) ? JSON.stringify(v) : typeof v === 'boolean' ? (v ? 1 : 0) : v;
   }
   return row;
 }
