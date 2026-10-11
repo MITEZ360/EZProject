@@ -14,11 +14,12 @@
     "test:unit": "vitest run test/unit",
     "test:boot": "vitest run test/boot",
     "test:e2e": "vitest run test/e2e",
-    "verify": "npm run typecheck && npm run typecheck:admin && npm run lint && npm run test:unit",
+    "verify": "npm run typecheck && npm run typecheck:admin && npm run lint && npm run test:unit && npm run test:admin",
     "verify:full": "npm run verify && npm run test:boot && npm run test:e2e",
     "check:kernel-vocab": "node scripts/check-kernel-vocab.mjs",
     "check:no-dialect": "node scripts/check-no-dialect.mjs",
-    "check:contract-snapshot": "node scripts/check-contract-snapshot.mjs"
+    "check:contract-snapshot": "node scripts/check-contract-snapshot.mjs",
+    "test:admin": "vitest run --config vitest.admin.config.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.4",
@@ -29,6 +30,9 @@
   },
   "devDependencies": {
     "@ant-design/icons": "^6.3.4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.7.0",
     "@types/react": "^19.3.0",
@@ -37,6 +41,7 @@
     "antd": "^6.6.5",
     "dayjs": "^1.11.23",
     "eslint": "^9.11.0",
+    "jsdom": "^25.0.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "typescript": "^5.6.2",

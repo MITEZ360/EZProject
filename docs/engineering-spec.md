@@ -93,6 +93,9 @@ platform/
 │   ├── registry.ts                #   模块注册表（扩展点插槽）
 │   └── index.ts                   #   内核对外出口（唯一出口）
 │
+├── test/
+│   ├── unit/ boot/ e2e/           #   后端测试（node 环境，vitest.config.ts）
+│   └── admin/                     #   管理端组件测试（jsdom，vitest.admin.config.ts）
 ├── modules/                       # 能力模块：可插拔
 │   ├── storage/                   #   存储能力（多数据库策略）
 │   │   ├── contract.ts            #   引用内核存储契约

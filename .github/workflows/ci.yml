@@ -5,7 +5,8 @@
 # 测试全部接进流水线，不再依赖人工记得跑 `make verify`。
 #
 # 分档（呼应 cookbook 的测试分层：日常只跑快的）：
-#   verify —— 日常档：双 tsconfig 类型检查 + eslint + 边界扫描 + 契约快照 + 单测
+#   verify —— 日常档：双 tsconfig 类型检查 + eslint + 边界扫描 + 契约快照
+#             + 后端单测 + 管理端组件测试（jsdom）
 #   full   —— 里程碑档：加启动测试、交付测试（压缩包隔离运行）、构建产物
 #
 # 运行时说明：验证与运行链一律走 Node（better-sqlite3 是原生模块，Bun 下不可用），
@@ -26,7 +27,7 @@ concurrency:
 
 jobs:
   verify:
-    name: 日常验证（类型 / 边界扫描 / 单测）
+    name: 日常验证（类型 / 边界扫描 / 单测 / 前端组件）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

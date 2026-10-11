@@ -227,6 +227,8 @@ function ComponentField({ field, value, onChange, disabled, depth = 0 }: Control
               <Button
                 size="small"
                 type="text"
+                aria-label={`上移第 ${i + 1} 项`}
+                title={`上移第 ${i + 1} 项`}
                 icon={<ArrowUpOutlined />}
                 disabled={disabled || i === 0}
                 onClick={() => moveItem(i, -1)}
@@ -234,6 +236,8 @@ function ComponentField({ field, value, onChange, disabled, depth = 0 }: Control
               <Button
                 size="small"
                 type="text"
+                aria-label={`下移第 ${i + 1} 项`}
+                title={`下移第 ${i + 1} 项`}
                 icon={<ArrowDownOutlined />}
                 disabled={disabled || i === items.length - 1}
                 onClick={() => moveItem(i, 1)}
@@ -242,6 +246,8 @@ function ComponentField({ field, value, onChange, disabled, depth = 0 }: Control
                 size="small"
                 type="text"
                 danger
+                aria-label={`删除第 ${i + 1} 项`}
+                title={`删除第 ${i + 1} 项`}
                 icon={<DeleteOutlined />}
                 disabled={disabled}
                 onClick={() => removeItem(i)}

@@ -6,7 +6,7 @@
 // 单字段控件（含 relation 选择器 / media 媒体库 / component 递归嵌套）见 components/FieldControl。
 
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { ApiError, api, apiTypes, type EntryItem, type EntityTypeDef, type FieldDef } from './lib/api';
 import { emptyFieldValue, emptyFormValues, normalizeComponentValue } from './lib/entry-format';
@@ -276,9 +276,20 @@ export default function ContentView({ pendingEdit, onConsumePending }: Props = {
                 >
                   编辑
                 </Button>
-                <Button size="small" danger onClick={() => void remove(it.id)}>
-                  删除
-                </Button>
+                <Popconfirm
+                  title="确认删除该条目？"
+                  description="删除后不可在界面上撤销（可用版本历史回滚）"
+                  okText="删除"
+                  okButtonProps={{ danger: true }}
+                  cancelText="取消"
+                  onConfirm={() => void remove(it.id)}
+                >
+                  {/* 删除是不可逆操作，必须二次确认：列表里"删除"和"编辑"
+                      挨得极近，手滑点到的概率不低 */}
+                  <Button size="small" danger>
+                    删除
+                  </Button>
+                </Popconfirm>
               </Space>
             ),
           },

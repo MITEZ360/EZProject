@@ -6,7 +6,7 @@
 # 运行时说明：验证链走 Node（npm run），因为 better-sqlite3 原生模块在 Bun 下不可用；
 # Bun 只用于依赖安装与构建加速。详见 docs/dev-log.md。
 
-.PHONY: help install dev typecheck lint test verify verify-full check build package clean backup backup-list backup-inspect restore restore-dry backup-rotate backup-cron
+.PHONY: help install dev typecheck lint test test-admin verify verify-full check build package clean backup backup-list backup-inspect restore restore-dry restore-run backup-rotate backup-cron
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -20,8 +20,12 @@ typecheck: ## 类型检查（后端 + 管理后台，双 tsconfig）
 lint: ## 静态检查（eslint 边界规则 + 内核词汇 + 方言分支 + 契约快照）
 	npm run lint && npm run check:kernel-vocab && npm run check:no-dialect && npm run check:contract-snapshot
 
-test: ## 单元测试（快）
+test: ## 单元测试（快：后端单测 + 管理端组件测试）
 	npm run test:unit
+	npm run test:admin
+
+test-admin: ## 管理端组件测试（jsdom；单独跑用这个）
+	npm run test:admin
 
 verify: typecheck lint test ## 日常验证（提交前跑这个）
 

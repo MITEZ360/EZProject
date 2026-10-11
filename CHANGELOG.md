@@ -22,6 +22,8 @@
 - **6 张模块私有表改声明式**：`audit_logs`、`auth_users`、`auth_roles`、`auth_refresh_tokens`、`assets`、`settings`；`bool` 列在 PG 落原生 `BOOLEAN`（原 codec 把 boolean 转 0/1，等于迁就了错误的列类型），JSON 列 PG 侧统一 `TEXT`（与驱动内置表一致）
 
 ### Fixed
+- **内容列表"删除"一点即删，无二次确认**：删除是不可逆操作，而"删除"与"编辑"在表格里紧挨着，手滑点到的概率不低。现包裹 Popconfirm 二次确认，并在提示里指向版本历史作为退路
+- **component 嵌套项的排序/删除按钮无可访问名称**：只有图标没有文字，屏幕阅读器读不出这是什么按钮。现在每个按钮带 `aria-label`（"上移第 N 项"等）
 - **备份/恢复在同一秒内连续执行必然失败**：`VACUUM INTO` 拒绝写已存在文件，而两个脚本的时间戳只精确到秒。定时任务重试、脚本连跑两次、备份+恢复紧挨着——都会直接报错。现在时间戳改为毫秒 + 序号兜底
 - **`media` 目录恢复失败**（恢复脚本首次实现时）：`cpSync` 缺 `recursive: true`，媒体恢复路径必然抛 `Recursive option not enabled`
 - **损坏的备份快照能覆盖生产库**（严重）：原先只跑 `integrity_check`，而页内容损坏时它仍返回 ok——真正的崩溃发生在覆盖之后读数据时，那时生产库已被毁。现在校验会**逐表真读一遍**，且快照打不开 / `integrity_check` 抛错 / 恢复后库打不开三种情况都收敛为友好提示 + 明确回退指引，并保证目标库分毫未动
@@ -35,6 +37,11 @@
 - **SQLite 数据文件父目录不存在时启动失败**：驱动现在自动创建父目录。原先抛的是英文原生错误 `Cannot open database because the directory does not exist`，与"解压即用"的定位不符（实测踩到：清空 `data/` 后服务直接起不来）
 
 ### Added
+- **管理端组件级测试（此前为零）**：新增 `vitest.admin.config.ts`（jsdom，与后端 node 环境分开，避免全局污染）+ `test/admin/`，共 **34 项**覆盖 App 认证门、FieldControl 11 种调色板类型与递归嵌套、SearchView、ContentView 保存链路
+  - **认证门用例是回归防线**：原缺陷（`setAuthed(true)` 写在 `hasSession()` 判断之外，未登录也能进后台）能一路通过 typecheck / lint / build——所有静态检查都对一个死掉的门视而不见。现在"healthz 通过但无会话"必须停在登录页
+  - **ContentView 保存链路锁死**：改的 slug/status 必须真随请求发出、且不重复塞进 `data`。服务端 `update` 曾只合并 `data`，表现为"保存成功但 URL 不变"
+  - **SearchView**：搜索请求固定带 `status=all`（否则管理端搜不到草稿）；相关度用 `toPrecision` 不能显示成 `0.000`
+- **jsdom 环境补齐集中在 `test/admin/setup.ts`**：matchMedia / ResizeObserver / IntersectionObserver / scrollTo —— 每个 shim 都在记录组件对浏览器 API 的真实隐性依赖，而不是散落在各用例里
 - **`scripts/restore.mjs`（备份恢复）**：`--list` / `--inspect` / `--dry-run` 三种只读模式先看再动；恢复前**自动留底** `pre-restore-<时间戳>.db`（回退路径永远存在）；恢复后逐表比对行数与清单并显式报出差异；媒体经临时目录换名式替换（中断不留半截文件）；非交互环境必须显式 `--yes`，不会静默覆盖
 - **`scripts/backup-rotate.mjs`（保留策略）**：GFS 保留法（默认小时 24 / 天 14 / 周 8 / 月 12，约 58 份），**最新一份永不删除**；逐档按时间桶占槽而非"距今 N 天"（备份断档时不会连带删掉该窗口唯一一份可用备份）；支持 `--dry-run` 预演与 `KEEP_*` 环境变量调参
 - **`scripts/backup-cron.mjs`（定时入口）**：备份 + 轮转绑成一个原子步骤——拆成两条 cron 命令意味着两者可能只成功一半（备份成了但轮转没跑会占满磁盘；轮转跑了但备份没成功等于净损失）。退出码非 0 让 cron/监控能发现
