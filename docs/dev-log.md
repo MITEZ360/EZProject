@@ -266,3 +266,19 @@ engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/ed
 **验证**：65/65 全绿；双 tsconfig 类型检查过；vite build 正常；全仓 lint 过。
 
 ---
+
+## 2026-10-11 · 决策 #26：内容字段类型集定稿（讨论产出，未实现）
+
+**背景**：明确产品愿景——平台既能组装"通用 CMS"（适用多业务，有舍有得），也能组装"专用 CMS"（如博客）；
+通用 CMS 要求**动态数据 schema**。讨论确认：与 Strapi 同构 = "封闭原子类型集 + 动态组合"；
+存储走**逻辑 Schema**（类型定义是数据，不跑 DDL）——对文件存储同样成立，是混合存储愿景的技术前提。
+
+**决策**（engineering-spec 4.2.1 / design 6.7）：
+- 调色板 11 种：text / longText / number / boolean / date / select / richText(PT) / component(递归≤3) / relation / media / json
+- 通用选项：required / default / pattern / min / max
+- 明示取舍：字段级唯一=软校验（强唯一走顶层 slug 物理索引）；多语言=实体级 locale 列
+- **查询效率三层保障**：顶层物理列优先 → JSON 字段等值/范围/包含查询（策略表落方言）→ 物化字段后手（`materialized`，写入双写，通用默认关、专用按需开）
+
+**实现顺序**（未开工）：字段类型集（Zod 校验器扩展）→ defineType 落库 → 类型 CRUD API → 后台类型编辑器 → JSON 查询契约扩展（core/ 分支）。
+
+---

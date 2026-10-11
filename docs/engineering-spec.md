@@ -289,6 +289,73 @@ export function fromBlockEditor(tree: BlockTree): PortableText { /* ... */ }
 // 存储永远只有一种：PortableText。禁止两套格式并存。
 ```
 
+### 4.2.1 内容字段类型集（v1 定稿 · 决策 #26）
+
+> **定位**：通用 CMS 的"字段调色板"——与 Strapi 同构：**封闭的原子类型集 + 动态组合**。
+> 字段全部存于 `data`（JSON），类型定义本身是数据（`content_types` 表）——即"逻辑 Schema"路线
+> （不跑 DDL，对数据库/文件存储同样成立）。有舍有得：查询效率靠"顶层物理列 + 物化字段后手"保障（见下）。
+
+#### 调色板（11 种）
+
+**A. 基础标量**
+
+| 类型 | 语义 | JSON 形态 | 通用选项 |
+|------|------|-----------|---------|
+| `text` | 短文本（单行） | string | pattern |
+| `longText` | 多行纯文本 | string | min/max（长度） |
+| `number` | 数值 | number | min/max、`integer` |
+| `boolean` | 布尔 | boolean | — |
+| `date` | 时间点 | number（epoch ms） | min/max；`dateOnly`（UTC 零点约定） |
+| `select` | 枚举（单/多选） | string / string[] | `options[]`（必填）、`multiple` |
+
+**B. 结构**
+
+| 类型 | 语义 | JSON 形态 | 约束 |
+|------|------|-----------|------|
+| `richText` | 富文本 | **Portable Text 结构** | 铁律类型（6.2/4.2） |
+| `component` | 嵌套结构（可重复） | object / object[] | `fields: FieldDef[]` 递归；`repeatable`；**深度 ≤ 3** |
+
+**C. 引用（只存 ID，不存 URL/内容）**
+
+| 类型 | 语义 | JSON 形态 | 取舍 |
+|------|------|-----------|------|
+| `relation` | 引用同租户另一条内容 | 目标 entity id（string） | `targetType?` 限定；**无外键**，目标删除后引用悬空，读取时服务层标注 `stale` |
+| `media` | 引用媒体资产 | asset id（string） | 依赖 asset 契约（阶段二定稿）；先定名占位，校验只查 ID 格式 |
+
+**D. 逃生舱**
+
+| 类型 | 语义 | 说明 |
+|------|------|------|
+| `json` | 任意 JSON | 系统不解释、不做查询承诺、保证原样存取——保证"永远装得下" |
+
+**不做**（对照 Strapi 砍掉）：email/url/uid（`text`+pattern 覆盖）、password（账号体系不归内容层）、
+dynamic zone（预留：component 数组 + select 覆盖 90% 场景，其查询/校验复杂度翻倍，等真实需求）。
+
+#### FieldDef 通用选项
+
+`required`、`default`、`pattern`（text）、`min`/`max`（number/date）。
+
+#### 明示取舍（写死，防止将来含糊）
+
+1. **字段级唯一性 = 尽力而为**：JSON 路线无数据库唯一索引可挂，应用层查重有竞态窗口；
+   **顶层 `slug` 例外**（物理列 + 真唯一索引）。约定：需要强唯一性的值提升为顶层 slug。
+2. **多语言不做字段级**：多语言在**实体级**（`locale` 列，一个语言一条 entity）。
+   字段级本地化（Strapi 式）把翻译进度复杂度带进数据模型，不采用。
+
+#### 查询效率策略（配套承诺）
+
+1. **顶层列优先**：`type/slug/locale/status/tenantId/deletedAt/createdAt` 是物理列且有索引——
+   高频筛选条件应提升为顶层列，而不是埋进 JSON。
+2. **JSON 字段查询**：`QuerySpec` 支持对 JSON 字段的**等值 / 范围（number/date）/ 包含**查询，
+   经二维策略表落方言（SQLite `json_extract` 打头）。此项为契约扩展，走 `core/` 分支。
+3. **物化字段（预留后手）**：`FieldDef` 预留 `materialized` 语义——声明后驱动把该字段
+   **提升为物理列 + 索引**（写入时双写）。通用 CMS 默认不开（全 JSON）；专用场景对高频查询字段按需开启。
+   这是"通用 CMS 效率非极致"的补偿机制，也是"通用 vs 专用"效率差异的技术落地点。
+4. **计数走 `count()`**、分页走 limit/offset（已定）；JSON 查询无法命中索引时，文档量大的场景
+   必须先物化再查询（由场景/类型设计者负责判断）。
+
+---
+
 ### 4.3 存储策略接口（多数据库的核心抽象）
 
 ```ts

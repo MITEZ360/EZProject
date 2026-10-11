@@ -546,6 +546,25 @@ Markdown 编辑器 ──解析──▶ ┐
 
 ---
 
+### 6.7 字段类型集与查询效率（决策 #26 · 定稿见 engineering-spec 4.2.1）
+
+**通用 CMS 的字段调色板定稿为 11 种**：text / longText / number / boolean / date / select /
+richText(PT) / component（递归，深 ≤3）/ relation / media / json（逃生舱）。
+封闭原子集 + 动态组合——"灵活定制字段"的灵活来自组合，不来自发明类型。
+
+**存储走"逻辑 Schema"**：类型定义是数据（`content_types` 表），数据存 JSON，**不跑 DDL**——
+动态 schema 对数据库与文件存储同样成立，这是"混合存储"愿景的技术前提。
+
+**查询效率的三层保障**（"通用 CMS 有舍有得"的补偿）：
+1. 顶层物理列（type/slug/status/locale…）有索引，高频条件优先放顶层；
+2. JSON 字段等值/范围/包含查询经策略表落方言（SQLite `json_extract` 打头）；
+3. **物化字段后手**：`FieldDef.materialized` 声明后字段提升为物理列+索引（写入双写）——
+   通用 CMS 默认全 JSON，专用场景按需物化。**这条就是"通用 vs 专用"效率差异的技术开关。**
+
+**明示取舍**：字段级唯一为软校验（强唯一走顶层 slug 真索引）；多语言在实体级（locale 列），不做字段级。
+
+---
+
 ## 7. 数据模型设计
 
 ### 7.1 逻辑表结构（方言无关描述）
