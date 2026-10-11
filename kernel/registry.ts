@@ -47,6 +47,8 @@ export const Tokens = {
   Identity: 'identity',
   Search: 'search',
   Audit: 'audit',
+  Assets: 'assets',
+  Cache: 'cache',
   Settings: 'settings',
 } as const;
 
