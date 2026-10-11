@@ -19,7 +19,14 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
 
-    "noEmit": true
+    "noEmit": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@kernel/*": ["kernel/*"],
+      "@modules/*": ["modules/*"],
+      "@scenarios/*": ["scenarios/*"]
+    }
   },
   "include": ["scenarios/blog/admin/src", "vite.config.ts"]
 }

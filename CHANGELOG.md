@@ -21,6 +21,9 @@
 - **Makefile**：`build-admin` 目标；`package` 自包含包携带后台（解压即得 API + 后台）
 - **双 tsconfig**：根（后端）/ `tsconfig.admin.json`（JSX+DOM）
 
+### Changed
+- **PT 归一逻辑归位模块层**：`markdownToPt`/`ptToMarkdown` 移至 `modules/content/editor/normalize.ts`（对齐 engineering-spec 4.2），admin 仅调用；Vite/tsconfig 打通 `@modules` 别名
+
 ### Verified
 - 全套测试 65/65；端到端冒烟：后台页面/静态资源/SPA 兜底/API 404 边界全过
 

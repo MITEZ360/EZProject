@@ -1,5 +1,6 @@
-// scenarios/blog/admin/src/lib/pt.ts
-// Markdown → Portable Text 的阶段一极简转换（"Markdown 编辑器模式"的写入归一）。
+// modules/content/editor/normalize.ts
+// 编辑器双模式归一（engineering-spec 4.2）：写入时统一为 Portable Text。
+// 纯函数、无 IO——任何编辑器（Markdown/块编辑）与任何场景后台都共享此实现。
 // 存储永远只有 PT（铁律）；HTML/渲染产物不在此层。
 // 支持子集：# 标题（1-3 级）、- 无序列表、空行分段、其余为普通段落。行内样式阶段一不解析。
 

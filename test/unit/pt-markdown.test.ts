@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { markdownToPt, ptToMarkdown } from '@scenarios/blog/admin/src/lib/pt.js';
+import { markdownToPt, ptToMarkdown } from '@modules/content/editor/normalize.js';
 
 describe('Markdown → Portable Text（写入归一）', () => {
   it('标题/段落/列表归一为 PT block 结构', () => {

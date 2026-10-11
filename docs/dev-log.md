@@ -248,3 +248,21 @@
 - [ ] authz 模块（RBAC）替换 Bearer Token 守卫
 
 ---
+
+## 2026-10-11 · 修正：PT 归一逻辑归位模块层（分支 `fix/pt-normalize-location`）
+
+**背景**：用户复核指出——`markdownToPt`/`ptToMarkdown` 放在 `scenarios/blog/admin/src/lib/` 位置错误；
+engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/editor/normalize.ts`（模块层共享）。
+场景层私有化会让其他场景后台（知识中台/SaaS）无法复用。
+
+**修正**：
+- `git mv` 至 `modules/content/editor/normalize.ts`（git 识别为 rename，历史保留）
+- admin 经 `@modules/...` 别名调用：Vite `resolve.alias` + `tsconfig.admin.json paths` 打通
+- 测试 import 同步更新（用例不变，6 个全过）
+
+**澄清**（"是否违反不做端侧渲染"）：不违反。归一是**输入数据形态转换**（Markdown 文本 → PT 结构），
+浏览器内无任何 HTML 渲染；铁律"存结构不存 HTML、渲染产物仅作缓存"未破。
+
+**验证**：65/65 全绿；双 tsconfig 类型检查过；vite build 正常；全仓 lint 过。
+
+---
