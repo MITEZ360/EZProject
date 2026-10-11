@@ -667,32 +667,38 @@ Markdown 编辑器 ──解析──▶ ┐
 >
 > **「单二进制」与「压缩包」的地位是平等的**，谁更方便直观就选谁。**不为追求"必须是一个文件"而牺牲方便**。
 
-#### 首选实现：单二进制（当它确实最简时）
+#### 现实约束（落地后确认）⭐
 
-```bash
-bun build ./src/index.ts --compile --outfile dist/app
-# 产出 dist/app —— 目标机器无需 Bun、无需 Node、无需 nginx
-```
+> **`better-sqlite3` 是原生模块，Bun 无法加载**（含 `bun --compile` 产物）。
+> 又因我们**禁用 Bun 独有 API**（不许用 `bun:sqlite`），故：
+> **阶段一交付采用 ② 自包含压缩包（app + node_modules，Node 运行时）**，而非 `bun --compile` 单二进制。
+> 这恰好印证了 8.1 的原则——**形态服务于"不用装环境"，而不是反过来**。
 
-- React 静态产物通过 **`embed`** 打进二进制。
-- SQLite 驱动（`better-sqlite3`）也在二进制内，数据库即一个文件。
-- 形态：一个二进制 + 一个 `.db` 文件，拷过去就能跑。
-
-#### 备选实现：自包含压缩包（需要多文件/资源时）
+#### 实现：自包含压缩包（阶段一采用）
 
 ```bash
 make package
-# 产出 dist/headless-cms-<version>-<os>-<arch>.tar.gz，内含：
-#   headless-cms            # 可执行文件（含运行时）
-#   public/                 # 前端静态资源（不 embed 时）
-#   config.example.toml     # 示例配置
-#   README.txt              # 三步跑起来
+# 产出 dist/headless-cms-<version>.tar.gz，内含：
+#   app.mjs            # 打包后的应用（TS 已内联）
+#   node_modules/      # 依赖（含原生模块 better-sqlite3）
+#   package.json
+#   README.txt         # 三步跑起来
 ```
 
-- **目标机器**：`tar -xzf ... && ./headless-cms`。**同样无需任何预装环境**。
-- **何时选它**：资源多、要带插件/主题、想保留可读的文件结构便于排障。
+- **目标机器**：`tar -xzf ... && node app.mjs`（需 Node ≥ 20，其余零依赖）。
+- **何时选它**：资源多、带原生模块、想保留可读结构便于排障——**本项目即此情形**。
 
-> **共同点**：无论 ①②，**目标机器零环境依赖**——这才是"自包含"的衡量标准，而非"是不是单文件"。
+#### 备选：单二进制（当不涉及原生模块时）
+
+```bash
+bun build ./scenarios/blog/main.ts --compile --outfile dist/app
+# 仅当应用不依赖任何 .node 原生模块时可用
+```
+
+- 若将来改用纯 JS 的 SQLite 实现（或 `bun:sqlite` 策略），可回到单二进制。
+- 当前受原生模块限制，**不作为阶段一交付形态**。
+
+> **共同点**：无论哪种，**目标机器零环境依赖**——这才是"自包含"的衡量标准，而非"是不是单文件"。
 
 ### 8.2 交叉编译注意
 
