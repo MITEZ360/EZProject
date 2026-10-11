@@ -19,7 +19,7 @@ import {
   message,
 } from 'antd';
 import { ApiError, api, getToken, setToken, type PostListItem } from './lib/api';
-import { markdownToPt, ptToMarkdown } from './lib/pt';
+import { markdownToPt, ptToMarkdown } from '@modules/content/editor/normalize.js';
 
 interface EditState {
   id?: string;
