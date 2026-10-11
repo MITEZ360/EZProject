@@ -69,6 +69,12 @@ export interface Entity {
   /** 租户短 id（8 字符 base62） */
   tenantId: string;
   type: string;
+  /**
+   * 顶层保留列：租户内人类可读的唯一标识（可空）。
+   * 它**不属于** `data`——内容模块在写入时把 slug 从数据里提取到这一列，
+   * 并以 `(tenant_id, slug, deleted_at)` 唯一索引约束（软删除哨兵值法）。
+   */
+  slug: string | null;
   locale: string;
   /** 内核不限定取值（业务状态机在模块层） */
   status: string;
