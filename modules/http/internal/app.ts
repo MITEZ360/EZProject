@@ -11,6 +11,9 @@ import type { AuditService } from '@kernel/contracts/audit.contract.js';
 import type { SettingsService } from '@kernel/contracts/settings.contract.js';
 import type { IdentityService } from '@kernel/contracts/identity.contract.js';
 import type { AuthzService } from '@kernel/contracts/authz.contract.js';
+import type { AssetStore } from '@kernel/contracts/asset.contract.js';
+import type { CacheProvider } from '@kernel/contracts/cache.contract.js';
+import { newId } from '@kernel/primitives/id.js';
 import { mountAuthRoutes } from './auth-routes.js';
 import type { Principal } from '@kernel/primitives/principal.js';
 import type { Registry } from '@kernel/registry.js';
@@ -55,6 +58,37 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
   // ---------- Content API（对外 · 只读 · 匿名 · 可缓存） ----------
   const contentApi = new Hono<Vars>();
 
+  const cacheOf = (): CacheProvider | undefined => deps.registry.get<CacheProvider>('cache');
+  const assetsOf = (): AssetStore | undefined => deps.registry.get<AssetStore>('assets');
+
+  /** 读路径缓存：命中即返回；未命中查询后写回（TTL 60s）。key 前缀与写失效一致 */
+  const withCache = async (
+    tenantId: string,
+    key: string,
+    produce: () => Promise<unknown>
+  ): Promise<{ value: unknown; hit: boolean }> => {
+    const cache = cacheOf();
+    if (!cache) return { value: await produce(), hit: false };
+    const ck = `content:${tenantId}:${key}`;
+    const hit = await cache.get(ck);
+    if (hit !== null) return { value: hit, hit: true };
+    const value = await produce();
+    await cache.set(ck, value, 60);
+    return { value, hit: false };
+  };
+
+  // GET /api/v1/assets/:id —— 资产下载/回源（公开读；长缓存）
+  contentApi.get('/assets/:id', async (c) => {
+    const assets = assetsOf();
+    if (!assets) return c.json({ error: { code: 'E_NOT_FOUND', message: '媒体模块未挂载' } }, 404);
+    const tenantId = c.req.query('tenant') ?? deps.tenantId;
+    const found = await assets.read(c.req.param('id'), tenantId);
+    if (!found) return c.json({ error: { code: 'E_NOT_FOUND', message: '资产不存在' } }, 404);
+    c.header('content-type', found.asset.contentType);
+    c.header('cache-control', 'public, max-age=86400, immutable');
+    return c.body(found.data as unknown as ArrayBuffer);
+  });
+
   // GET /api/v1/:type —— 列表（分页 + 过滤；默认只出 published）
   // 自定义字段查询：?filter[price][gte]=100&filter[tags][contains]=hot（决策 #26）
   contentApi.get('/:type', async (c) => {
@@ -65,15 +99,20 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     if (errors.length > 0) {
       return c.json({ error: { code: 'E_VALIDATION', message: errors.join('；') } }, 400);
     }
-    const page = await deps.content.find({
-      type,
-      tenantId: q['tenant'] ?? deps.tenantId,
-      locale: q['locale'],
-      status: status === 'all' ? undefined : status,
-      filters: filters.length > 0 ? filters : undefined,
-      limit: q['limit'] ? Math.min(Number(q['limit']), 100) : 20,
-      offset: q['offset'] ? Number(q['offset']) : 0,
-    });
+    const tenantId = q['tenant'] ?? deps.tenantId;
+    const { value, hit } = await withCache(tenantId, c.req.path + '?' + new URL(c.req.url).search, () =>
+      deps.content.find({
+        type,
+        tenantId,
+        locale: q['locale'],
+        status: status === 'all' ? undefined : status,
+        filters: filters.length > 0 ? filters : undefined,
+        limit: q['limit'] ? Math.min(Number(q['limit']), 100) : 20,
+        offset: q['offset'] ? Number(q['offset']) : 0,
+      })
+    );
+    const page = value as { items: unknown[]; total: number };
+    if (hit) c.header('x-cache', 'HIT');
     c.header('Cache-Control', 'public, max-age=60'); // 对外只读，可进 CDN
     return c.json({ items: page.items, total: page.total });
   });
@@ -146,6 +185,35 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
   // 注意：所有固定路径路由（auth/users/roles/types/audit-logs/settings）必须注册在 /:type 通配之前
   mountAuthRoutes(manage, { registry: deps.registry, defaultTenantId: deps.tenantId });
 
+  // GET /api/manage/v1/assets —— 资产列表（媒体模块贡献）
+  manage.get('/assets', async (c) => {
+    const assets = assetsOf();
+    if (!assets) return notFound(c);
+    return c.json({ items: await assets.list(c.get('tenantId') as string) });
+  });
+
+  // POST /api/manage/v1/assets —— 上传（multipart: file 字段）
+  manage.post('/assets', async (c) => {
+    const assets = assetsOf();
+    if (!assets) return notFound(c);
+    const auth = await authorize(c, 'assets', 'create');
+    if ('denied' in auth) return auth.denied;
+    const form = await c.req.formData().catch(() => null);
+    const file = form?.get('file');
+    if (!(file instanceof File)) {
+      return c.json({ error: { code: 'E_VALIDATION', message: '需要 multipart 字段 file' } }, 400);
+    }
+    const id = newId();
+    const asset = await assets.put({
+      id,
+      tenantId: c.get('tenantId') as string,
+      filename: file.name,
+      contentType: file.type || 'application/octet-stream',
+      data: new Uint8Array(await file.arrayBuffer()),
+    });
+    return c.json({ ...asset, url: `/api/v1/assets/${id}` }, 201);
+  });
+
   // GET /api/manage/v1/audit-logs（audit 模块贡献；未加载 → 404 JSON）
   manage.get('/audit-logs', async (c) => {
     const audit = deps.registry.get<AuditService>('audit');
@@ -182,6 +250,16 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     } catch (e) {
       return c.json(errorBody(e), statusOf(e) === 500 ? 400 : statusOf(e));
     }
+  });
+
+  // DELETE /api/manage/v1/assets/:id
+  manage.delete('/assets/:id', async (c) => {
+    const assets = assetsOf();
+    if (!assets) return notFound(c);
+    const auth = await authorize(c, 'assets', 'delete');
+    if ('denied' in auth) return auth.denied;
+    await assets.remove(c.req.param('id'), c.get('tenantId') as string);
+    return c.json({ ok: true });
   });
 
   // ---------- 类型管理（决策 #26：类型定义是数据） ----------

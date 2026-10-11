@@ -180,3 +180,72 @@ export const settingsApi = {
   set: (key: string, value: unknown) =>
     request<{ ok: boolean }>('PUT', `/api/manage/v1/settings/${encodeURIComponent(key)}`, { value }),
 };
+
+// ==================== 用户 / 角色（RBAC） ====================
+
+export interface UserItem {
+  id: string;
+  email: string;
+  name: string;
+  roles: string[];
+  status: string;
+}
+export interface AuthzPermission {
+  resource: string;
+  actions: string[];
+  deniedFields?: string[];
+}
+export interface RoleItem {
+  slug: string;
+  name: string;
+  permissions: AuthzPermission[];
+  builtin?: boolean;
+}
+
+export const usersApi = {
+  list: () => request<{ items: UserItem[] }>('GET', '/api/manage/v1/users'),
+  create: (input: { email: string; name: string; password: string; roles: string[] }) =>
+    request<UserItem>('POST', '/api/manage/v1/users', input),
+  update: (id: string, patch: { name?: string; roles?: string[]; status?: string }) =>
+    request<UserItem>('PUT', `/api/manage/v1/users/${id}`, patch),
+  setPassword: (id: string, password: string) =>
+    request<{ ok: boolean }>('POST', `/api/manage/v1/users/${id}/password`, { password }),
+};
+
+export const rolesApi = {
+  list: () => request<{ items: RoleItem[] }>('GET', '/api/manage/v1/roles'),
+  upsert: (role: { slug: string; name: string; permissions: AuthzPermission[] }) =>
+    request<RoleItem>('POST', '/api/manage/v1/roles', role),
+  remove: (slug: string) => request<{ ok: boolean }>('DELETE', `/api/manage/v1/roles/${slug}`),
+};
+
+// ==================== 媒体资产 ====================
+
+export interface AssetItem {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  url?: string;
+}
+
+export const assetsApi = {
+  list: () => request<{ items: AssetItem[] }>('GET', '/api/manage/v1/assets'),
+  /** 上传（multipart/form-data；不经 request 封装，避免 JSON 序列化） */
+  upload: async (file: File): Promise<AssetItem> => {
+    const form = new FormData();
+    form.set('file', file);
+    const res = await fetch('/api/manage/v1/assets', {
+      method: 'POST',
+      headers: getToken() ? { authorization: `Bearer ${getToken()}` } : {},
+      body: form,
+    });
+    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      const err = (json['error'] ?? {}) as { code?: string; message?: string };
+      throw new ApiError(res.status, err.code ?? 'E_UNKNOWN', err.message ?? res.statusText);
+    }
+    return json as unknown as AssetItem;
+  },
+  remove: (id: string) => request<{ ok: boolean }>('DELETE', `/api/manage/v1/assets/${id}`),
+};

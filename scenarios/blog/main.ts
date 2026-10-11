@@ -5,9 +5,13 @@
 // 注意：环境变量读取用 process.env（兼容 Node），不使用 Bun.env。
 
 import { serve, type ServerType } from '@hono/node-server';
+import { Hono } from 'hono';
 import { createBlogApp } from './index.js';
+import { createBlogFront } from './front/index.js';
 import { HttpTokens } from '@modules/http/index.js';
-import type { Hono } from 'hono';
+import type { ContentService } from '@kernel/contracts/content.contract.js';
+import type { CacheProvider } from '@kernel/contracts/cache.contract.js';
+import { Tokens } from '@kernel/registry.js';
 
 async function main(): Promise<void> {
   const dialect = (process.env['DB_DIALECT'] as 'sqlite' | 'postgres' | 'mysql') ?? 'sqlite';
@@ -42,7 +46,19 @@ async function main(): Promise<void> {
   }
 
   // 启动 HTTP 服务（@hono/node-server：Node 兼容运行时）
-  const hono = app.registry.require<Hono>(HttpTokens.App);
+  // 前台页面（场景自有展示层）挂在 API/静态之前：同一份内容，两个消费方
+  const root = new Hono();
+  root.route(
+    '/',
+    createBlogFront({
+      content: app.registry.require<ContentService>(Tokens.Content),
+      tenantId,
+      siteTitle: process.env['SITE_TITLE'] ?? '我的博客',
+      cache: app.registry.get<CacheProvider>(Tokens.Cache),
+    })
+  );
+  root.route('/', app.registry.require<Hono>(HttpTokens.App));
+  const hono = root;
   const server: ServerType = serve({ fetch: hono.fetch, port }, (info) => {
     console.log(`[http] listening on http://localhost:${info.port}`);
     console.log(`[http] Content API   GET /api/v1/posts`);

@@ -8,6 +8,10 @@ import { storageModule } from '@modules/storage/index.js';
 import { contentModule } from '@modules/content/index.js';
 import { httpModule, type HttpModuleOptions } from '@modules/http/index.js';
 import { authzModule, type AuthzModuleOptions } from '@modules/authz/index.js';
+import { mediaModule, type MediaModuleOptions } from '@modules/media/index.js';
+import { cacheModule, type CacheModuleOptions } from '@modules/cache/index.js';
+import { auditModule } from '@modules/audit/index.js';
+import { settingsModule } from '@modules/settings/index.js';
 
 /** 博客的内容类型定义（数据驱动，非内核代码） */
 export const blogTypes: EntityTypeDef[] = [
@@ -19,6 +23,7 @@ export const blogTypes: EntityTypeDef[] = [
       { name: 'title', type: 'text', required: true },
       { name: 'body', type: 'richText', required: true },
       { name: 'featured', type: 'boolean' },
+      { name: 'cover', type: 'media' }, // 封面：只存 asset id（铁律）
     ],
     versioned: true,
     locales: ['zh', 'en'],
@@ -34,6 +39,10 @@ export interface BlogOptions {
   tenantId?: string;
   /** 身份与权限模块配置（JWT 密钥等）；不传则用默认（开发随机密钥） */
   authz?: AuthzModuleOptions;
+  /** 缓存模块配置（memory 默认 / none） */
+  cache?: CacheModuleOptions;
+  /** 媒体模块配置（local 目录） */
+  media?: MediaModuleOptions;
   /** HTTP 模块配置（不传则不挂 HTTP 层） */
   http?: HttpModuleOptions;
 }
@@ -43,8 +52,12 @@ export async function createBlogApp(options: BlogOptions = {}): Promise<App> {
   return bootstrap({
     modules: [
       storageModule({ dialect: options.dialect, url: options.url }),
+      cacheModule(options.cache), // 内容读缓存（memory/none）
       authzModule(options.authz),
       contentModule(blogTypes),
+      mediaModule(options.media), // 媒体资产（local 策略）
+      auditModule(), // 审计日志（通用管理）
+      settingsModule(), // 系统设置（通用管理）
       ...(options.http ? [httpModule({ ...options.http, tenantId: options.tenantId })] : []),
     ],
     config: { dialect: options.dialect, url: options.url },

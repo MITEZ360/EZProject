@@ -33,6 +33,11 @@ build: build-admin ## 产出可运行产物（自包含包：内联 TS；原生�
 		--external better-sqlite3
 	@echo "→ dist/app.mjs（原生模块由 node_modules 提供；"自包含"见 make package）"
 
+build-blog: build-admin ## 构建博客场景（前台 + 后台）
+	bun build ./scenarios/blog/main.ts --target=node --outfile dist/blog.mjs \
+		--external better-sqlite3
+	@echo "→ dist/blog.mjs（含 SSR 前台 + 管理后台）"
+
 build-admin: ## 构建管理后台（React + Vite）→ dist/admin
 	npx tsc -p tsconfig.admin.json
 	npx vite build

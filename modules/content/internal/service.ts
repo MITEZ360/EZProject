@@ -14,6 +14,7 @@ import type {
 } from '@kernel/contracts/content.contract.js';
 import type { StorageDriver } from '@kernel/contracts/storage.contract.js';
 import type { EventBus } from '@kernel/events/types.js';
+import type { CacheProvider } from '@kernel/contracts/cache.contract.js';
 import { newId, notDeleted } from '@kernel/primitives/id.js';
 import { platformError, type Result, ok, err } from '@kernel/primitives/result.js';
 import { validateEntityData, validateTypeDef } from './validate.js';
@@ -43,7 +44,16 @@ interface ContentTypeRow {
   updatedAt: number;
 }
 
-export function createContentService(driver: StorageDriver, events?: EventBus): ContentService {
+export function createContentService(
+  driver: StorageDriver,
+  events?: EventBus,
+  cache?: CacheProvider
+): ContentService {
+  /** 内容变更 → 失效该租户的内容缓存（HTTP 读路径用同一前缀） */
+  const invalidateContent = async (tenantId: string): Promise<void> => {
+    if (cache) await cache.invalidate(`content:${tenantId}:`);
+  };
+
   const svc = {
     /** 定义/更新内容类型：落 content_types（逻辑 Schema，不迁移旧数据）。
      *  actor.tenantId 为 '*' 时写入通配定义（代码内建类型的种子）。 */
@@ -123,7 +133,7 @@ export function createContentService(driver: StorageDriver, events?: EventBus): 
       // 单事务内完成"取分页数据 + 计数"：total 与 items 保证同一一致性视图。
       // 计数用 tx.count（SQL COUNT），禁止全量取回再取 length。
       // filters（决策 #26：自定义字段等值/范围/包含）find 与 count 必须同一套。
-      return driver.transaction(async (tx) => {
+      const page = await driver.transaction(async (tx) => {
         const [items, total] = await Promise.all([
           tx.find<EntryRow>({
             table: TABLE,
@@ -137,6 +147,12 @@ export function createContentService(driver: StorageDriver, events?: EventBus): 
         ]);
         return { items: items as unknown as Entity[], total };
       });
+
+      // 多语言回退（实体级多语言）：指定 locale 无结果时回退 default
+      if (page.total === 0 && query.locale && query.locale !== 'default') {
+        return svc.find({ ...query, locale: 'default' });
+      }
+      return page;
     },
 
     async findOne(id: string, tenantId: string): Promise<Entity | null> {
@@ -172,6 +188,7 @@ export function createContentService(driver: StorageDriver, events?: EventBus): 
         deletedAt: 0,
       };
       await driver.transaction((tx) => tx.insert(TABLE, entity));
+      await invalidateContent(entity.tenantId);
       await emit('created', entity, input.actor);
       return entity as unknown as Entity;
     },
@@ -198,6 +215,7 @@ export function createContentService(driver: StorageDriver, events?: EventBus): 
       const updated = await driver.transaction((tx) =>
         tx.update<EntryRow>(TABLE, id, patch)
       );
+      await invalidateContent(updated.tenantId);
       await emit('updated', updated, input.actor);
       return updated as unknown as Entity;
     },
@@ -211,6 +229,7 @@ export function createContentService(driver: StorageDriver, events?: EventBus): 
       const removed = await driver.transaction((tx) =>
         tx.update<EntryRow>(TABLE, id, { deletedAt: Date.now(), updatedAt: Date.now() })
       );
+      await invalidateContent(removed.tenantId);
       await emit('deleted', removed, actor);
     },
   };
