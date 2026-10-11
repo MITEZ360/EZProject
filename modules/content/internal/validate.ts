@@ -204,3 +204,56 @@ function checkRange(
   if (field.min !== undefined && n < field.min) fail(`不能小于 ${field.min}`);
   if (field.max !== undefined && n > field.max) fail(`不能大于 ${field.max}`);
 }
+
+// ==================== 类型定义本身的校验（defineType 入口） ====================
+
+const SLUG_RE = /^[a-z][a-z0-9-]*$/;
+const FIELD_NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/** 校验类型定义合法性（defineType 入口）。返回问题列表（空 = 合法）。 */
+export function validateTypeDef(def: EntityTypeDef): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const fail = (field: string, message: string): void => {
+    issues.push({ field, message });
+  };
+
+  if (!SLUG_RE.test(def.slug)) fail('slug', '类型 slug 须为小写字母开头的 kebab-case');
+  if (!def.fields || def.fields.length === 0) fail('fields', '至少需要一个字段');
+
+  const seen = new Set<string>();
+  for (const f of def.fields ?? []) {
+    if (!FIELD_NAME_RE.test(f.name)) {
+      fail(f.name, '字段名须为合法标识符');
+      continue;
+    }
+    if (RESERVED_KEYS.has(f.name)) {
+      fail(f.name, `字段名 "${f.name}" 为保留键（映射顶层物理列）`);
+      continue;
+    }
+    if (seen.has(f.name)) fail(f.name, '字段名重复');
+    seen.add(f.name);
+    if (f.type === 'select' && (!f.options || f.options.length === 0)) {
+      fail(f.name, 'select 字段必须声明 options');
+    }
+    if (f.type === 'component' && (!f.fields || f.fields.length === 0)) {
+      fail(f.name, 'component 字段必须声明 fields');
+    }
+    if (f.type === 'relation' && f.targetType !== undefined && !SLUG_RE.test(f.targetType)) {
+      fail(f.name, 'targetType 须为合法类型 slug');
+    }
+  }
+
+  // component 深度检查（与数据校验同限）
+  const depthOf = (fields: FieldDef[], d: number): number =>
+    Math.max(
+      d,
+      ...(fields ?? []).map((f) =>
+        f.type === 'component' ? depthOf(f.fields ?? [], d + 1) : d
+      )
+    );
+  if (depthOf(def.fields ?? [], 1) > MAX_COMPONENT_DEPTH) {
+    fail('fields', `component 嵌套超过 ${MAX_COMPONENT_DEPTH} 层`);
+  }
+
+  return issues;
+}
