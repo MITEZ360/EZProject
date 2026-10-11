@@ -58,6 +58,49 @@ export interface TableSchema {
   jsonColumns?: string[];
 }
 
+/**
+ * 可移植列类型：模块私有表声明列时**只能**用这些逻辑类型，
+ * 物理落地（text/varchar、bigint/integer、json/jsonb、boolean/tinyint）由驱动按方言决定。
+ *
+ * 为什么必须收归契约：模块手写物理类型是"换配置可切库"最隐蔽的杀手——
+ * SQLite 的 `INTEGER` 是 64 位动态类型，PG 的 `integer` 只有 32 位，
+ * 同一份 DDL 在一个方言上正常、在另一个方言上直接溢出（实测：epoch 毫秒写 PG
+ * 报 `out of range for type integer`）。物理类型一旦离开契约的管辖范围，
+ * 就会以"只在某个方言上炸"的形式回归——而 SQLite 侧的测试**永远发现不了**。
+ */
+export type PortableColumnType = 'text' | 'int' | 'json' | 'timestamp' | 'bool';
+
+/** 模块私有表的列声明 */
+export interface ColumnDef {
+  /** 物理列名（下划线命名） */
+  name: string;
+  type: PortableColumnType;
+  primaryKey?: boolean;
+  notNull?: boolean;
+  /** 字面量默认值（数字或字符串）。**不接受 SQL 片段**——既防注入，也防方言语法外泄 */
+  default?: number | string;
+}
+
+/** 模块私有表的索引声明 */
+export interface IndexDef {
+  name: string;
+  /** 列名列表；前缀 `-` 表示该列降序（如 `['tenant_id', '-occurred_at']`） */
+  columns: string[];
+  unique?: boolean;
+}
+
+/** 模块私有表声明：建表 + 登记表结构一步完成 */
+export interface TableDef {
+  table: string;
+  columns: ColumnDef[];
+  indexes?: IndexDef[];
+  /**
+   * 应用字段 → 物理列名的映射与 JSON 列声明（语义同 `TableSchema`）。
+   * 建表时一并登记，避免"建了表却忘了登记"导致读写报未声明。
+   */
+  schema?: TableSchema;
+}
+
 export interface StorageDriver {
   readonly dialect: Dialect;
   migrate(): Promise<void>;
@@ -65,5 +108,17 @@ export interface StorageDriver {
   transaction<T>(fn: (tx: StorageTx) => Promise<T>): Promise<T>;
   /** 模块私有表登记（模块 setup 建 DDL 后调用；未登记的表禁止读写——防拼错表名） */
   registerTable(name: string, schema: TableSchema): void;
+  /**
+   * 创建模块私有表：DDL 由存储层按方言生成（物理类型、默认值、索引语法全部方言无关化），
+   * 并同时登记表结构（等价于 `registerTable`）。
+   *
+   * 为什么要有它：模块自己拼 DDL，就必须知道物理类型与方言语法——而这正是
+   * "只在某个方言上暴露的缺陷"的来源。声明式建表把两者都收归存储层。
+   *
+   * 语义：**幂等**（重复调用等价于 `IF NOT EXISTS`；表已存在时不改动既有结构）。
+   * 边界：无法声明式表达的表（SQLite FTS5 虚拟表、PG tsvector 表等）仍走 `exec`
+   * 原生通道——逃生舱保留，但不再是默认路径。
+   */
+  createTable(def: TableDef): Promise<void>;
   close(): Promise<void>;
 }
