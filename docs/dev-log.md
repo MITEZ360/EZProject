@@ -282,3 +282,27 @@ engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/ed
 **实现顺序**（未开工）：字段类型集（Zod 校验器扩展）→ defineType 落库 → 类型 CRUD API → 后台类型编辑器 → JSON 查询契约扩展（core/ 分支）。
 
 ---
+
+## 2026-10-11 · 字段类型集 v1 落地（分支 `core/field-type-palette`，决策 #26 第一步）
+
+**做了什么**：
+- **内核契约演进**（快照已更新，走 core/ 分支把关）：
+  - `FieldType` 定稿 11 种（text/longText/number/boolean/date/select/richText/component/relation/media/json）
+  - `FieldDef` 扩展通用选项：default/pattern/min/max/integer/dateOnly/multiple/options/repeatable/targetType；`materialized` 占位（物化字段后手）
+  - 旧名依定稿更名：`relationTo`→`targetType`、`many`→`multiple`（无使用点，干净替换）
+- **校验器全类型实现**（modules/content/internal/validate.ts）：
+  - 每类型独立校验；`pattern` 优先于 range；`dateOnly` 强制 UTC 零点毫秒
+  - `component` 递归校验子字段，**深度 ≤3**；子对象多余键同样拒绝
+  - **未知字段拒绝**（拼错字段名写入时即暴露），保留键 `status`/`slug` 白名单放行（映射顶层物理列）
+- **测试**：+14 调色板单测（每类型 + 递归 + 未知字段 + 保留键）
+
+**分支说明**：本分支从 `kernel` 切出，故不含 main 上的 HTTP/admin 代码（main→kernel 禁止）；
+合并后 main 全套 79/79 全绿，契约快照一致。
+
+**遗留（#26 后续实现顺序）**：
+- [ ] `defineType` 落库（content_types 表已预留）
+- [ ] 类型 CRUD Management API
+- [ ] 后台类型编辑器
+- [ ] JSON 字段查询契约扩展（QuerySpec，走 core/ 分支）
+
+---

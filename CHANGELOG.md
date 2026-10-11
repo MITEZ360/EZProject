@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Added
+- **决策 #26 第一步落地**：`FieldDef` 契约演进（11 种调色板 + 通用选项）+ 校验器全类型实现（component 递归 ≤3、未知字段拒绝、dateOnly UTC 零点）；契约快照更新（core/field-type-palette → kernel → main）
 - **决策 #26（定稿）**：内容字段类型集 v1——11 种调色板（text/longText/number/boolean/date/select/richText/component/relation/media/json）+ 通用选项 + 明示取舍（字段级唯一软校验、实体级多语言）+ 查询效率三层保障（顶层列 / JSON 查询经策略表 / 物化字段后手）；逻辑 Schema 路线（类型定义是数据，不跑 DDL）（engineering-spec 4.2.1 + design 6.7）
 
 ## [0.3.0] - 2026-10-11 · React 管理后台
