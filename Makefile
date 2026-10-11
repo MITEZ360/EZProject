@@ -28,11 +28,25 @@ verify: typecheck lint test ## 日常验证（提交前跑这个）
 verify-full: verify ## 完整验证（里程碑/发版前）
 	npm run test:boot && npm run check:contract-snapshot && npm run test:e2e
 
-build: ## 产出单二进制（自包含）
-	bun build ./kernel/index.ts --compile --outfile dist/app
+build: ## 产出可运行产物（自包含包：内联 TS；原生模块保持 external）
+	bun build ./scenarios/blog/main.ts --target=node --outfile dist/app.mjs \
+		--external better-sqlite3
+	@echo "→ dist/app.mjs（原生模块由 node_modules 提供；"自包含"见 make package）"
 
-package: ## 产出压缩包（自包含）
-	@mkdir -p dist && tar -czf dist/headless-cms-$$(node -p "require('./package.json').version").tar.gz kernel modules scenarios package.json
+package: ## 产出压缩包（自包含交付：app + node_modules + 说明）
+	@mkdir -p dist/pkg
+	bun build ./scenarios/blog/main.ts --target=node --outfile dist/pkg/app.mjs \
+		--external better-sqlite3
+	cp package.json dist/pkg/
+	cp -r node_modules dist/pkg/node_modules
+	@printf '%s\n' \
+	  'Headless CMS Platform' \
+	  '用法：' \
+	  '  1) 需要目标机器有 Node >= 20（本包自包含"应用+依赖"，不含运行时）' \
+	  '  2) DB_DIALECT=sqlite DB_URL=./data/app.db node app.mjs' \
+	  > dist/pkg/README.txt
+	cd dist/pkg && tar -czf ../headless-cms-$$(node -p "require('../../package.json').version").tar.gz .
+	@echo "→ dist/headless-cms-*.tar.gz"
 
 clean: ## 清理构建产物
-	rm -rf dist coverage
+	rm -rf dist coverage data
