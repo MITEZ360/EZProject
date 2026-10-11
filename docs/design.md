@@ -782,7 +782,7 @@ bun build ./scenarios/blog/main.ts --compile --outfile dist/app
 - [ ] 租户管理、配额、计费埋点
 - [ ] 查询层强制注入 `tenant_id`
 - [ ] 租户级角色权限
-- [ ] **迁移到 PostgreSQL**（若尚在 SQLite）
+- [x] **PostgreSQL 驱动已就绪**（在真实 PG 上通过全部存储契约测试；CI 持续验证）
 
 ### 阶段四：企业能力（有真实客户时）
 - [ ] `AuthProvider` 策略：SSO（SAML/OIDC）
