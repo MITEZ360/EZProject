@@ -53,11 +53,24 @@ make verify
 # 完整验证（里程碑：+ 启动测试 + 契约快照 + 交付测试）
 make verify-full
 
-# 本地运行（默认 SQLite，零配置）
-npx tsx scenarios/blog/main.ts
+# 本地运行（默认 SQLite，零配置；构建后用 Node 跑）
+make build && PORT=3000 node dist/app.mjs
 
 # 构建自包含交付物
 make package          # → dist/headless-cms-<ver>.tar.gz（解压即用）
+```
+
+**HTTP API（阶段一已就绪）**：
+
+```bash
+# Content API（只读 · 匿名 · 可缓存）
+curl http://localhost:3000/api/v1/posts              # 已发布列表
+curl http://localhost:3000/api/v1/posts/hello-world  # 按 slug 读单篇
+
+# Management API（写 · Bearer Token 守卫，token 由 MANAGE_TOKEN 环境变量配置）
+curl -X POST http://localhost:3000/api/manage/v1/posts \
+  -H "authorization: Bearer $MANAGE_TOKEN" -H "content-type: application/json" \
+  -d '{"title":"第一篇","slug":"hello-world","body":[],"status":"published"}'
 ```
 
 > **运行时说明**：`better-sqlite3` 原生模块**在 Bun 下不可用**，故**运行与测试链走 Node**；

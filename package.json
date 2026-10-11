@@ -20,7 +20,9 @@
     "check:contract-snapshot": "node scripts/check-contract-snapshot.mjs"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.4",
     "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.13",
     "zod": "^3.23.8"
   },
   "devDependencies": {

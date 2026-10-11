@@ -6,6 +6,7 @@ import { bootstrap, type App, type Logger } from '@kernel/bootstrap.js';
 import type { EntityTypeDef } from '@kernel/primitives/entity.js';
 import { storageModule } from '@modules/storage/index.js';
 import { contentModule } from '@modules/content/index.js';
+import { httpModule, type HttpModuleOptions } from '@modules/http/index.js';
 
 /** 博客的内容类型定义（数据驱动，非内核代码） */
 export const blogTypes: EntityTypeDef[] = [
@@ -27,14 +28,19 @@ export interface BlogOptions {
   dialect?: 'sqlite' | 'postgres' | 'mysql';
   url?: string;
   logger?: Logger;
+  /** 默认租户（博客场景单租户起步） */
+  tenantId?: string;
+  /** HTTP 模块配置（不传则不挂 HTTP 层） */
+  http?: HttpModuleOptions;
 }
 
-/** 组装博客场景：storage + content（+ 未来 authz/search）。 */
+/** 组装博客场景：storage + content + http（+ 未来 authz/search）。 */
 export async function createBlogApp(options: BlogOptions = {}): Promise<App> {
   return bootstrap({
     modules: [
       storageModule({ dialect: options.dialect, url: options.url }),
       contentModule(blogTypes),
+      ...(options.http ? [httpModule({ ...options.http, tenantId: options.tenantId })] : []),
     ],
     config: { dialect: options.dialect, url: options.url },
     logger: options.logger,

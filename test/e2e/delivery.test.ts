@@ -38,13 +38,15 @@ describe('自包含交付', () => {
   });
 
   it('在隔离目录可直接运行并自检通过（不依赖源码目录）', () => {
-    const out = execFileSync('node', ['app.mjs'], {
+    // --selfcheck：完成内核+模块装配自检后即退出（HTTP 常驻模式见 scenarios/blog/main.ts）
+    const out = execFileSync('node', ['app.mjs', '--selfcheck'], {
       cwd: work,
       encoding: 'utf8',
       timeout: 30_000,
     });
     expect(out).toContain('[kernel] 已挂载模块: storage');
     expect(out).toContain('[kernel] 已挂载模块: content');
+    expect(out).toContain('[kernel] 已挂载模块: http');
     expect(out).toContain('[selfcheck] OK');
   });
 });
