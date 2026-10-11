@@ -1,0 +1,39 @@
+{
+  "name": "headless-cms-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "自研无头 CMS 平台：内核 + 可插拔模块 + 场景产品",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test:unit": "vitest run test/unit",
+    "test:boot": "vitest run test/boot",
+    "test:e2e": "vitest run test/e2e",
+    "verify": "npm run typecheck && npm run lint && npm run test:unit",
+    "verify:full": "npm run verify && npm run test:boot && npm run test:e2e",
+    "check:kernel-vocab": "node scripts/check-kernel-vocab.mjs",
+    "check:no-dialect": "node scripts/check-no-dialect.mjs",
+    "check:contract-snapshot": "node scripts/check-contract-snapshot.mjs"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "better-sqlite3": "^11.3.0",
+    "@types/better-sqlite3": "^7.6.11",
+    "eslint": "^9.11.0",
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.7.0",
+    "vitest": "^2.1.1"
+  },
+  "trustedDependencies": [
+    "better-sqlite3",
+    "esbuild"
+  ]
+}

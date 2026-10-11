@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+
+    "noEmit": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@kernel/*": ["kernel/*"],
+      "@modules/*": ["modules/*"],
+      "@scenarios/*": ["scenarios/*"]
+    }
+  },
+  "include": ["kernel", "modules", "scenarios", "test", "scripts"],
+  "exclude": ["node_modules", "dist", "web"]
+}

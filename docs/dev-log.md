@@ -82,6 +82,8 @@
 **经验教训（已记入 cookbook）**：
 - 内容系统必须存"中性结构"，不能存渲染产物（HTML）。
 - 架构讨论要敢于推翻前一版结论（Payload 从内核→模块→弃用）。
+- **`better-sqlite3` 与 Bun 不兼容**：Bun 无法加载该原生模块（`bun --compile` 出的二进制亦不可用），
+  Bun 仅可用于 install/build；**运行与测试链必须走 Node**。这印证了"代码兼容 Node"的策略价值。
 
 **遗留 / 下一步**：
 - [ ] 搭最小可运行骨架（工程规范第 10 章第 1~4 步）
@@ -89,5 +91,45 @@
 - [ ] 实现内容模块 + Portable Text 原语 + Zod 校验
 - [ ] React 后台 + React Content/Management API
 - [ ] 产出**自包含交付物**（单二进制 / 压缩包，二选一），在干净机器验证
+
+---
+
+## 2026-10-11 · 内核骨架落地（工程规范第 10 章第 1~4 步）
+
+**目标**：把设计/规范落成可运行的骨架，验证两个架构分水岭。
+
+**做了什么**（分支 `core/scaffold`，从 `kernel` 切出）：
+- **工程骨架**：tsconfig（strict + 路径别名）、eslint 边界规则、CI 扫描脚本（内核词汇 / 方言分支 / 契约快照）、Makefile、vitest。
+- **内核（第 1 步）**：primitives（result / id / entity / principal / portable-text + Zod）、events（types + bus）、contracts（storage / content / module / authz / search）、registry、bootstrap、唯一出口 index。
+- **存储策略（第 2 步）**：`columns.ts` 二维策略表、`sqlite.driver.ts`（实现 StorageDriver）、`factory.ts`（唯一选择点）、storageModule。
+- **内容模块 + 场景（第 3 步）**：content 模块（写入强制 PT 校验、软删除）、博客场景（数据驱动类型 + 可运行入口）、启动自检日志。
+- **交付（第 4 步）**：`make package` 出自包含压缩包，隔离目录解压即跑。
+
+**关键决策**：
+
+| # | 决策 | 结论 | 理由 |
+|---|------|------|------|
+| 19 | 运行/测试运行时 | **验证链与运行走 Node；Bun 只做 install/build** | `better-sqlite3` 原生模块在 Bun 下不可用（含编译产物） |
+| 20 | 交付形态落地 | **自包含压缩包**（app.mjs + node_modules + 说明），原生模块保持 external | Bun 无法打包原生模块；压缩包解压即用，符合"自包含≠单文件" |
+| 21 | 驱动依赖 | 驱动**直连 better-sqlite3**（不引入 Drizzle 运行时） | 契约已 ORM 无关；`drizzle-orm` 仅作多方言预留，避免过度依赖 |
+
+**遇到的问题 / 解决**：
+- **问题**：内核词汇扫描把 `const order`（排序义）误判为业务词"订单"。
+  → **解决**：高歧义词（order/post/tag）移出黑名单，交给人工与契约快照把关。
+- **问题**：`bun --compile` 编译出的二进制运行时报 `Could not find module root` / 找不到 `.node`。
+  → **解决**：确认 Bun 不支持原生模块 ⇒ 改走"自包含压缩包 + Node 运行时"；打包时 `--external better-sqlite3`。
+- **问题**：工厂里 `builders[dialect];` 空表达式触发 lint。
+  → **解决**：改为显式 `IMPLEMENTED` 集合。
+
+**验证结果（机器判定）**：
+- `make verify`：typecheck + lint + 内核词汇/方言扫描 + **28 个单测** 全绿。
+- `make verify-full`：+ **9 个启动测试**（可拔插/切方言/内容铁律）+ **契约快照一致** + **2 个交付测试**（压缩包隔离运行）。
+- 启动日志：`[kernel] 已挂载模块: storage/content` + `[selfcheck] OK`。
+
+**遗留 / 下一步**：
+- [ ] 合并 `core/scaffold` → `kernel`（内核把关）→ 再反向同步到 `main`
+- [ ] Content API / Management API（HTTP 层，Hono）+ React 后台
+- [ ] 按需加 `authz` / `search` 模块
+- [ ] 真实 PG/MySQL 驱动（阶段三）
 
 ---

@@ -314,6 +314,23 @@ if (dialect === 'sqlite') { ... } else if (dialect === 'postgres') { ... }
 
 **验收**：（无法自动判定）属于**人工把关的少数例外**——评审时若发现"为省而省""为单文件而单文件"的代码，直接打回。
 
+### P3.3 Bun 不能加载原生模块（better-sqlite3）⭐踩过的坑
+
+**现象**：用 Bun 跑测试或 `bun --compile` 出的二进制，一碰 SQLite 就报
+`'better-sqlite3' is not yet supported in Bun` / `Could not find module root` / 找不到 `.node`。
+
+**原因**：Bun 无法加载 Node 原生扩展（`.node`）；且 `bun --compile` 会把 `better-sqlite3` 的 JS 内联，
+破坏其 `bindings` 路径解析。**这与"禁用 Bun 独有 API"叠加**——我们既不能用 `bun:sqlite`，也不能用 `better-sqlite3`@Bun。
+
+**对策**：
+> - **运行与测试链一律走 Node**（`npm run ...`）；**Bun 只用于 `bun install` / `bun build`**。
+> - 打包时把原生模块标为 external：`bun build ... --external better-sqlite3`，运行时由 `node_modules` 提供。
+> - 交付用**自包含压缩包**（app + node_modules），而非 `bun --compile` 单二进制。
+
+**验收**：`make verify` 在 Node 下全绿；`make verify-full` 的交付测试在隔离目录 `node app.mjs` 能起。
+
+> **呼应 P3.2**：这正是"自包含 ≠ 必须单文件"的现实理由——单二进制在原生模块前不可行，压缩包才是对的形态。
+
 ---
 
 ## P4. 本项目的验证约定

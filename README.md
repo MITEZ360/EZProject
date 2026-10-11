@@ -44,24 +44,36 @@ kernel/     内核层（稳定，对场景无知：契约 + 事件总线 + 注�
 ## 快速开始
 
 ```bash
-# 安装依赖
+# 安装依赖（Bun 只用于安装/构建）
 bun install
 
-# 开发模式（前端热更 + 后端热重载）
-make dev
+# 日常验证（快：类型 + lint + 内核扫描 + 单测）
+make verify
 
-# 构建自包含交付物（二选一）
-make build            # 单二进制  → dist/app
-make package          # 压缩包    → dist/headless-cms-<ver>.tar.gz
+# 完整验证（里程碑：+ 启动测试 + 契约快照 + 交付测试）
+make verify-full
 
-# 运行（把产物拷到目标机器，无需预装任何环境）
-./dist/app
-# 或
-tar -xzf dist/headless-cms-<ver>.tar.gz && ./headless-cms
+# 本地运行（默认 SQLite，零配置）
+npx tsx scenarios/blog/main.ts
+
+# 构建自包含交付物
+make package          # → dist/headless-cms-<ver>.tar.gz（解压即用）
 ```
 
-> 数据库默认 SQLite，零配置。
-> 切换数据库：`DB_DIALECT=postgres DB_URL=postgres://... ./dist/app`
+> **运行时说明**：`better-sqlite3` 原生模块**在 Bun 下不可用**，故**运行与测试链走 Node**；
+> Bun 只用于依赖安装与打包。详见 [docs/vibe-cookbook.md](./docs/vibe-cookbook.md) P3.3。
+>
+> 数据库默认 SQLite；切换：`DB_DIALECT=postgres DB_URL=postgres://... node app.mjs`（PG/MySQL 驱动待补）。
+
+## 项目结构
+
+```
+kernel/      内核：契约 + 事件总线 + 注册表 + 原语（对场景无知）
+modules/     能力模块：storage / content / authz / search ...（可插拔）
+scenarios/   场景产品：blog（只组装）
+test/        分层测试：unit（日常）/ boot（里程碑）/ e2e（发版前）
+scripts/     边界扫描：内核词汇 / 方言分支 / 契约快照
+```
 
 ## 文档索引
 
