@@ -306,3 +306,22 @@ engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/ed
 - [ ] JSON 字段查询契约扩展（QuerySpec，走 core/ 分支）
 
 ---
+
+## 2026-10-11 · defineType 落库 + 类型管理 API（分支 `feature/content-types-persist`，决策 #26 第二步）
+
+**做了什么**：
+- **契约演进**（`core/define-type-contract` → kernel → main）：`defineType(def, actor)` + 新增 `listTypes(tenantId)` / `getType(slug, tenantId)`
+- **服务层**：类型定义落 `content_types`（upsert，不迁移旧数据——逻辑 Schema）；类型解析经驱动读库（精确租户 → `'*'` 通配）；`validateTypeDef` 校验定义本身（slug 格式/字段名/保留键/select options/component 深度）
+- **contentModule**：内建类型以 `systemPrincipal('*')` 种子落库（幂等）——类型定义从"内存 Map"变"数据"
+- **HTTP**：`POST/GET /api/manage/v1/types`（注册在 `/:type` 通配路由之前，防吞）
+- **重要修正**：`blogTypes` 的 `slug` 字段声明移除——`slug`/`status` 是保留键（顶层物理列），不是 data 字段（校验器正确拦截了这一点，纪律生效）
+- **驱动修复（并发缺陷）**：`Promise.all` 并发发起两个事务在单连接上交错污染（实测 `no such savepoint`）→ 事务**排队互斥**（外层串行、嵌套放行防死锁）
+
+**验证**：全套 **86/86**（新增 7 个类型落库测试，含**跨重启持久化**）；tsc/lint/边界扫描全绿。
+
+**遗留（#26 后续）**：
+- [ ] 后台类型编辑器 UI
+- [ ] JSON 字段查询契约扩展（QuerySpec，走 core/ 分支）
+- [ ] 通用管理模块路线（已定：authz / audit(事件总线) / settings 服务能力 + 通用 admin 壳）
+
+---
