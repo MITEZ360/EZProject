@@ -11,6 +11,7 @@ import { authzModule, type AuthzModuleOptions } from '@modules/authz/index.js';
 import { mediaModule, type MediaModuleOptions } from '@modules/media/index.js';
 import { cacheModule, type CacheModuleOptions } from '@modules/cache/index.js';
 import { searchModule } from '@modules/search/index.js';
+import { webhookModule } from '@modules/webhook/index.js';
 import { auditModule } from '@modules/audit/index.js';
 import { settingsModule } from '@modules/settings/index.js';
 
@@ -43,7 +44,9 @@ export async function createGenericCmsApp(options: GenericCmsOptions = {}): Prom
       contentModule(), // 无内建类型：通用 CMS 的类型全部运行时定义
       mediaModule(options.media), // 媒体资产（local 策略）
       searchModule(), // 全文检索（SQLite FTS5；索引随内容事件增量更新）
-      ...(withAdmin ? [auditModule(), settingsModule()] : []),
+      ...(withAdmin
+        ? [auditModule(), settingsModule(), webhookModule()] // webhook 依赖 settings
+        : []),
       ...(options.http ? [httpModule({ ...options.http, tenantId: options.tenantId })] : []),
     ],
     config: { dialect: options.dialect, url: options.url },

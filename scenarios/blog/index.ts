@@ -11,6 +11,7 @@ import { authzModule, type AuthzModuleOptions } from '@modules/authz/index.js';
 import { mediaModule, type MediaModuleOptions } from '@modules/media/index.js';
 import { cacheModule, type CacheModuleOptions } from '@modules/cache/index.js';
 import { searchModule } from '@modules/search/index.js';
+import { webhookModule } from '@modules/webhook/index.js';
 import { auditModule } from '@modules/audit/index.js';
 import { settingsModule } from '@modules/settings/index.js';
 
@@ -60,6 +61,7 @@ export async function createBlogApp(options: BlogOptions = {}): Promise<App> {
       searchModule(), // 全文检索（SQLite FTS5；索引随内容事件增量更新）
       auditModule(), // 审计日志（通用管理）
       settingsModule(), // 系统设置（通用管理）
+      webhookModule(), // 内容事件外部通知（目标：WEBHOOK_URL 或租户设置 webhook.url）
       ...(options.http ? [httpModule({ ...options.http, tenantId: options.tenantId })] : []),
     ],
     config: { dialect: options.dialect, url: options.url },

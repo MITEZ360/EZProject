@@ -62,5 +62,9 @@ package: ## 产出压缩包（自包含交付：app + node_modules + admin + 说
 	cd dist/pkg && tar -czf ../headless-cms-$$(node -p "require('../../package.json').version").tar.gz .
 	@echo "→ dist/headless-cms-*.tar.gz"
 
+backup: ## 备份数据（DB 一致性快照 + 全表 JSON + 媒体文件）→ backups/<时间戳>/
+	@mkdir -p backups
+	node scripts/backup.mjs ./data/app.db ./backups
+
 clean: ## 清理构建产物
 	rm -rf dist coverage data

@@ -27,6 +27,8 @@ async function main(): Promise<void> {
       info: (msg, meta) => console.log(meta ? `${msg} ${JSON.stringify(meta)}` : msg),
       error: (msg, meta) => console.error(meta ? `${msg} ${JSON.stringify(meta)}` : msg),
     },
+    // 媒体资产目录（默认 ./data/media；显式指定便于备份与迁移）
+    media: process.env['MEDIA_ROOT'] ? { root: process.env['MEDIA_ROOT'] } : undefined,
     authz: { jwtSecret: process.env['JWT_SECRET'] },
     http: {
       // Management API 守卫：Bearer Token（生产必须显式配置 MANAGE_TOKEN）

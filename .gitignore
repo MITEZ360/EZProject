@@ -41,3 +41,6 @@ coverage/
 # 临时文件
 *.tmp
 tmp/
+
+# 备份产物
+backups/

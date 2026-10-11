@@ -78,6 +78,22 @@ curl -X POST http://localhost:3000/api/manage/v1/posts \
 >
 > 数据库默认 SQLite；切换：`DB_DIALECT=postgres DB_URL=postgres://... node app.mjs`（PG/MySQL 驱动待补）。
 
+## 备份与运维
+
+```bash
+make backup          # → backups/<时间戳>/
+```
+
+产出三组内容：`app.db`（**DB 一致性快照**，经 `VACUUM INTO` 生成——**服务运行中即可安全备份**，
+无需停服）、`dump.json`（全表 JSON，可读可迁移）、`media/`（媒体文件），附 `manifest.json` 清单。
+
+内容变更可经 Webhook 通知外部系统：
+
+```bash
+WEBHOOK_URL=https://example.com/hook node dist/app.mjs
+# 或在管理端"系统设置"里配置 webhook.url（每租户独立）
+```
+
 ## 项目结构
 
 ```
