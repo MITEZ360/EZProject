@@ -2,7 +2,7 @@
 
 > 面向：自建博客 / 多端内容 API / 未来 SaaS 多租户 / 企业内部中台
 > 约束：**部署极简（单二进制）、依赖少、资源占用低、架构可控可延伸**
-> 版本：v3.0 · 2026-10（v3：技术栈定稿 Bun+TS，多数据库策略模式，架构确认为自研内核）
+> 版本：v3.1 · 2026-10（v3.1：ID 策略、时间格式、软删除唯一约束定稿；v3：技术栈定稿 Bun+TS，多数据库策略模式，架构确认为自研内核）
 
 ---
 
@@ -336,10 +336,10 @@ export const column = (t: LogicalType, name: string, d: Dialect) => strategies[t
 
 | 差异点 | 统一做法（避免将来难迁） |
 |--------|------------------------|
-| 主键 | **应用层生成 UUID**（`crypto.randomUUID()`），不用自增 |
+| 主键 | **应用层生成**：租户用短 id，其他实体用 **UUIDv7**（见 7.2），不用自增 |
 | JSON | Drizzle `mode:'json'`，序列化在应用层 |
 | 布尔 | Drizzle `boolean()` 自动映射，不写裸 SQL |
-| 时间 | **统一 UTC ISO 字符串 / epoch 整数** |
+| 时间 | **统一存 epoch 毫秒整数**（`integer` / `bigint`；跨方言无时区歧义，排序/索引天然有序）；对外 API 可序列化为 ISO 8601 |
 | UPSERT | Drizzle `.onConflictDoUpdate()` |
 | Collation | 显式指定，不依赖默认（MySQL 默认不区分大小写） |
 | 全文搜索 | 各自策略实现，契约层只暴露 `search()` |
@@ -541,17 +541,42 @@ Markdown 编辑器 ──解析──▶ ┐
 |----|------|---------|
 | `tenants` | 租户（初期仅一条默认记录） | id, name, slug, plan |
 | `content_types` | 内容类型定义 | id, tenant_id, slug, schema(JSON) |
-| `entries` | 所有内容条目（主体存 JSON） | id, tenant_id, content_type, locale, status, data(JSON), published_at, deleted_at |
+| `entries` | 所有内容条目（主体存 JSON） | id, tenant_id, content_type, slug, locale, status, data(JSON), published_at, deleted_at |
 | `entry_versions` | 版本历史 | id, entry_id, version, data(JSON) |
 | `users` | 用户 | id, tenant_id, email, password_hash |
 | `roles` | 角色（RBAC + Scope） | id, tenant_id, name, permissions(JSON) |
 | `media` | 媒体资源 | id, tenant_id, filename, mime, size, url |
 
-**关键设计**：所有业务表统一带 `tenant_id`（为多租户预留）；内容主体用 **JSON 字段**存（配合应用层 Zod 校验）；**主键统一应用层 UUID**。
+**关键设计**：所有业务表统一带 `tenant_id`（为多租户预留）；内容主体用 **JSON 字段**存（配合应用层 Zod 校验）；**主键统一应用层生成**（见 7.2）。
 
 > 具体物理类型由第 5 章的策略表按方言生成（如 `data` 在 PG 是 `jsonb`、SQLite 是 `text`、MySQL 是 `json`）。
 
-### 7.2 权限模型（RBAC + Scope + 字段级）
+### 7.2 ID 策略（定稿）
+
+**原则：显式 ID + 不可变 + 可读性分层。** 不同实体承担不同职责，ID 形式因此不同：
+
+| 实体 | ID 形式 | 理由 |
+|------|---------|------|
+| **租户** | **短 ID**（8 字符 base62，如 `a3f9k2xq`） | 会出现在 URL / 子域名 / 配置里，**必须短、可读、可手抄**；写入后**不可修改** |
+| **其他所有实体**（entry、user、media、content_type…） | **UUIDv7** | 全局唯一、无需中心协调；v7 时间有序，**索引友好**（避免 v4 随机主键的页分裂） |
+| **内容条目** | 额外带 `slug`（租户内唯一） | 对外 URL 用 slug，不用 UUID（`/blog/hello-world` 而非 `/blog/0192f...`） |
+
+> **租户 id 不可改**：改名走 `tenants.name`，**id 永久不变**。这样外键、日志、审计、缓存键都不会因改名而失效。
+
+**租户表（id ↔ name 映射）**：
+
+| 字段 | 说明 |
+|------|------|
+| `id` | 短 id（PK，base62，8 字符，**不可变**） |
+| `name` | 租户显示名（**可改**） |
+| `slug` | 可选，用于子域名/前台路由；若用则全局唯一 |
+| `plan` | 套餐标识 |
+| `created_at` / `updated_at` | 审计字段 |
+
+> **为什么租户特殊**：租户是所有数据的顶层隔离维度，它的 id 会**渗进每一次查询、每一个 URL、每一条日志**。用 UUIDv7 会让这一切臃肿；用短 id 换取可读性，收益远大于碰撞风险的代价（8 字符 base62 ≈ 2.2×10¹⁴ 种，租户量级下碰撞可忽略）。
+> **生成与校验**：短 id 由应用层生成（`crypto` 随机 → base62 → 8 字符），落库前查重；UUIDv7 走统一工具函数（见 engineering-spec）。
+
+### 7.3 权限模型（RBAC + Scope + 字段级）
 
 ```json
 {
@@ -570,7 +595,31 @@ Markdown 编辑器 ──解析──▶ ┐
 - **`scope`**：数据范围（仅自己 / 本部门 / 全租户）——多租户与审批流的基础。
 - **`fields.deny`**：字段级权限——企业场景刚需，前期就要抽象好。
 
-### 7.3 多租户策略
+### 7.4 软删除与唯一约束（定稿）
+
+**软删除**：内容条目用 `deleted_at`（epoch 毫秒整数，**`0` 表示未删**，`>0` 为删除时刻）。**删除是打标，不是物理删**——保留审计与恢复能力。
+
+**唯一约束的坑**：`slug` 在租户内唯一，但软删除后 slug 应被**释放**（可复用），否则用户删了文章想用回原 slug 会撞约束。
+
+> ⚠️ **关键陷阱**：不能用 `UNIQUE(tenant_id, slug, deleted_at)`！
+> 因为 SQL 标准里 **`NULL` 互不相等**——活跃行的 `deleted_at` 都是 `NULL`，它们在唯一约束下**互不冲突**，会导致**同一租户可插入多条同 slug 的活跃行**。这是反向的 bug。
+> 三家（PG/SQLite/MySQL）在这一点上**行为一致，都是错的用法**。
+
+**正解（定稿）：活跃标记 + 部分索引，或"活跃行 deleted_at 用哨兵值"**：
+
+| 方案 | 写法 | 适用 |
+|------|------|------|
+| **① 部分唯一索引** | `CREATE UNIQUE INDEX ... ON entries(tenant_id, slug) WHERE deleted_at IS NULL` | PG / SQLite ✅；**MySQL 8 不支持** ❌ |
+| **② 哨兵值法**（跨方言通用，**本平台采用**） | 活跃行 `deleted_at = 0`（epoch 毫秒 0 = 未删），删除时写入真实毫秒时间戳；再 `UNIQUE(tenant_id, slug, deleted_at)` | 三家全支持 ✅ |
+
+> **本平台选择方案 ②「哨兵值法」**：
+> - 活跃行 `deleted_at = 0`，删除行 `deleted_at = <真实毫秒>`（必 > 0）。
+> - 因 `0` 是**确定值**（非 NULL），`UNIQUE(tenant_id, slug, deleted_at)` 就能**正确约束"同一租户+同一 slug 仅一条活跃行"**。
+> - 删除后可复用 slug（旧行 `deleted_at` 为真实时间戳，与新活跃行的 `0` 不冲突）。
+> - **代价**：`deleted_at = 0` 需在查询里换算为"未删除"语义（`WHERE deleted_at = 0`），代码层统一用 `isDeleted()` 助手封装。
+> - **收益**：**三方言写法完全一致**，不需要部分索引，贴合"多数据库"目标。
+
+### 7.5 多租户策略
 
 | 策略 | 隔离性 | 成本 | 适用 |
 |------|--------|------|------|
@@ -584,7 +633,7 @@ Markdown 编辑器 ──解析──▶ ┐
 
 ## 8. 部署与发布
 
-### 7.1 发布形态：单二进制（首选）
+### 8.1 发布形态：单二进制（首选）
 
 ```bash
 bun build ./src/index.ts --compile --outfile dist/app
@@ -595,16 +644,16 @@ bun build ./src/index.ts --compile --outfile dist/app
 - SQLite 驱动（`better-sqlite3`）也在二进制内，数据库即一个文件。
 - **最终形态**：一个二进制 + 一个 `.db` 文件，拷过去就能跑。
 
-### 7.2 交叉编译注意
+### 8.2 交叉编译注意
 
 `better-sqlite3` 是原生模块，**交叉编译（Mac 编 Linux）会有坑**。
 **规避**：**在目标平台或 Docker 内编译**。
 
-### 7.3 备选：单容器 Docker
+### 8.3 备选：单容器 Docker
 
 若坚持用 PostgreSQL，则单二进制无法覆盖数据库 → 用 `docker compose` 一键起 `app + db` 两个容器。**目标机器只需 Docker。**
 
-### 7.4 开发 vs 发布（两模式）
+### 8.4 开发 vs 发布（两模式）
 
 | 模式 | 前端 | 后端 | 命令 |
 |------|------|------|------|
@@ -681,6 +730,9 @@ bun build ./src/index.ts --compile --outfile dist/app
 | **编辑器** | **Markdown + 块编辑器双模式，写入归一为同一结构** |
 | **渲染产物** | **仅作缓存，永远可从结构再生** |
 | **媒体引用** | **存 asset 引用 ID，不存最终 URL** |
+| **ID 策略** | **租户用短 id（8 字符 base62，不可改），其他实体用 UUIDv7**；租户表做 id↔name 映射 |
+| **时间格式** | **统一 epoch 毫秒整数**（跨方言无歧义）；对外 API 可序列化为 ISO 8601 |
+| **软删除** | **`deleted_at` 哨兵值法**（活跃=0，删除=真实毫秒）+ `UNIQUE(tenant_id, slug, deleted_at)` |
 | 语言 / 运行时 | **TypeScript + Bun**（**兼容 Node**） |
 | 框架 | **Hono** |
 | ORM | **Drizzle**（多方言） |

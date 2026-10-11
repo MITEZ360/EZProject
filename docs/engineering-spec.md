@@ -1,9 +1,9 @@
-# 自研无头 CMS 平台 · 工程规范（v3.0）
+# 自研无头 CMS 平台 · 工程规范（v3.1）
 
 > 定位：平台化自研内核 + 可插拔能力模块 + 多场景产品
 > 用途：**写代码前先立规矩**。本文件是开发时的"宪法"，任何 AI 生成 / 人工编写的代码都必须遵守。
 > 技术栈：**TypeScript + Bun（兼容 Node） + Hono + Drizzle + SQLite/PG/MySQL**
-> 版本：v3.0 · 2026-10
+> 版本：v3.1 · 2026-10（v3.1：ID 原语、时间格式、软删除约定）
 
 ---
 
@@ -156,17 +156,40 @@ export interface EntityTypeDef {
 }
 
 export interface Entity {
-  id: string;                // 应用层 UUID
-  tenantId: string;
+  id: string;                // 应用层生成：UUIDv7（见 4.1.1）
+  tenantId: string;          // 租户短 id（8 字符 base62）
   type: string;
   locale: string;
   status: string;            // 内核不限定取值
   data: Record<string, unknown>;
-  createdAt: string;         // 统一 UTC ISO 字符串
-  updatedAt: string;
-  deletedAt?: string | null;
+  createdAt: number;         // epoch 毫秒整数（见 6.5）
+  updatedAt: number;
+  deletedAt: number;         // 哨兵值：0=未删除，>0=删除时刻毫秒
 }
 ```
+
+#### 4.1.1 ID 原语（`kernel/primitives/id.ts`）
+
+```ts
+// 统一生成入口 —— 禁止在业务代码里散落 randomUUID()
+import { randomUUID } from 'node:crypto';
+
+/** 通用实体 id：UUIDv7（时间有序，索引友好） */
+export function newId(): string {
+  return uuidv7();                     // 用 uuid 库的 v7，或自实现（时间戳前缀 + 随机）
+}
+
+/** 租户 id：8 字符 base62（短、可读、可手抄；不可变） */
+export function newTenantId(): string {
+  return toBase62(randomBytes(6)).slice(0, 8);   // 落库前查重
+}
+
+/** 软删除语义封装（避免各处散落 `= 0` 判断） */
+export const notDeleted = () => ({ deletedAt: 0 });   // 查询用 WHERE deleted_at = 0
+export const markDeleted = () => ({ deletedAt: Date.now() });
+```
+
+> **为什么集中**：ID 形式是可替换策略（今天是 UUIDv7，明天可能换），集中一处便于统一调整；也便于 CI 扫描"业务代码里出现 `randomUUID`"。```
 
 ### 4.2 内容层类型：Portable Text（严格遵循规范）
 
@@ -349,7 +372,7 @@ export interface DomainEvent<T = unknown> {
   name: string;                 // 'content.entry.published'
   tenantId: string;
   payload: T;
-  occurredAt: string;           // UTC ISO
+  occurredAt: number;           // epoch 毫秒整数
 }
 
 export interface EventBus {
@@ -481,8 +504,9 @@ db.run(sql`PRAGMA foreign_keys = ON;`);
 
 | 项 | 约定 |
 |----|------|
-| 主键 | 应用层 `crypto.randomUUID()` |
-| 时间 | 统一 UTC ISO 字符串 |
+| 主键 | 应用层生成：**租户用短 id（8 字符 base62）**，**其他实体用 UUIDv7**（`kernel/primitives/id.ts` 统一封装） |
+| 时间 | **统一 epoch 毫秒整数**（`integer`/`bigint`）；对外 API 可序列化为 ISO 8601 |
+| 软删除 | `deleted_at` **哨兵值法**：活跃=`0`，删除=真实毫秒；`UNIQUE(tenant_id, slug, deleted_at)` |
 | JSON | Drizzle `mode:'json'` |
 | 布尔 | Drizzle `boolean()` |
 | UPSERT | Drizzle `.onConflictDoUpdate()` |

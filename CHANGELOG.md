@@ -13,9 +13,15 @@
 - 文档体系：`README.md`、`docs/dev-log.md`、`CHANGELOG.md`、`docs/vibe-cookbook.md`
 - 设计文档 `docs/design.md`（v4）
 - 工程规范 `docs/engineering-spec.md`（v3）
+- **ID 策略定稿**：租户短 id（8 字符 base62，不可变）+ 其他实体 UUIDv7 + 租户表 id↔name 映射
+- **时间格式定稿**：统一 epoch 毫秒整数
+- **软删除定稿**：`deleted_at` 哨兵值法（活跃=0）+ `UNIQUE(tenant_id, slug, deleted_at)`
+- **术语"策略表"**：在三处文档定义并互链（design 5.2 / engineering-spec 5.3 / cookbook P1.1）
 
 ### Changed
 - 富文本格式表述：由"兼容 Portable Text"改为**"严格遵循 Portable Text 规范"**
+- 跨方言约定：时间由"UTC ISO 字符串"改为 **epoch 毫秒整数**（含 `Entity`/`DomainEvent` 字段）
+- 设计文档章节重排：第 7 章新增 ID 策略（7.2）、软删除与唯一约束（7.4），修正 8.x 编号
 
 ### Removed
 - **移除对 Payload CMS 的依赖**，内核完全自研
