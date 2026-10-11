@@ -3,6 +3,7 @@
 // 只依赖内核契约与 content 模块对外的 ContentService（经注册表注入），不 import 其他模块实现。
 
 import { Hono } from 'hono';
+import { serveStatic } from '@hono/node-server/serve-static';
 import type { ContentService } from '@kernel/contracts/content.contract.js';
 import type { Principal } from '@kernel/primitives/principal.js';
 import { statusOf, errorBody } from './errors.js';
@@ -23,6 +24,8 @@ export interface HttpDeps {
   guard: RequestGuard;
   /** 默认租户（场景注入；单租户场景的便捷） */
   tenantId: string;
+  /** 管理后台静态资源目录（相对 cwd，如 'dist/admin'）；不传则不托管 */
+  staticDir?: string;
 }
 
 export function buildApp(deps: HttpDeps): Hono<Vars> {
@@ -148,6 +151,23 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
 
   // 健康检查（交付测试/编排探测用）
   app.get('/healthz', (c) => c.json({ ok: true }));
+
+  // 管理后台静态资源（自包含交付的一部分；挂在最后，API 优先）
+  if (deps.staticDir) {
+    const root = deps.staticDir.replace(/\/$/, '');
+    app.use('*', async (c, next) => {
+      // 未被任何 API 路由匹配的请求到此：API 路径必须回 404 JSON，不能被 SPA 兜底吞掉
+      if (c.req.path.startsWith('/api/') || c.req.path === '/healthz') {
+        return c.json({ error: { code: 'E_NOT_FOUND', message: 'Not found' } }, 404);
+      }
+      await next();
+    });
+    app.use(
+      '*',
+      serveStatic({ root, rewriteRequestPath: (p) => p.replace(/^\/admin/, '') }),
+      serveStatic({ root, rewriteRequestPath: () => '/index.html' }) // SPA 兜底 → index.html
+    );
+  }
 
   return app;
 }

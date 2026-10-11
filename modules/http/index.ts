@@ -23,6 +23,8 @@ export interface HttpModuleOptions {
   tenantId?: string;
   /** Bearer Token 守卫的期望值（未传 guard 时生效） */
   manageToken?: string;
+  /** 管理后台静态资源目录（如 'dist/admin'；不传则不托管） */
+  staticDir?: string;
 }
 
 export function httpModule(options: HttpModuleOptions = {}): PlatformModule {
@@ -42,7 +44,9 @@ export function httpModule(options: HttpModuleOptions = {}): PlatformModule {
             process.env['MANAGE_TOKEN'] ??
             ''
         );
-      const app = buildApp({ content, guard, tenantId });
+      const staticDir =
+        options.staticDir ?? (config['staticDir'] as string | undefined) ?? process.env['ADMIN_STATIC_DIR'];
+      const app = buildApp({ content, guard, tenantId, staticDir });
       registry.provide<HttpApp>(HttpTokens.App, app);
     },
   };

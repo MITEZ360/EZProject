@@ -26,6 +26,8 @@ async function main(): Promise<void> {
     http: {
       // Management API 守卫：Bearer Token（生产必须显式配置 MANAGE_TOKEN）
       manageToken: process.env['MANAGE_TOKEN'] ?? 'dev-only-token',
+      // 管理后台静态资源（make build-admin 产出 dist/admin）
+      staticDir: process.env['ADMIN_STATIC_DIR'] ?? 'dist/admin',
     },
   });
 

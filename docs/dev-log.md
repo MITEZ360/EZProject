@@ -214,3 +214,37 @@
 - [ ] 字段裁剪 / API 版本化 / 限流（阶段二）
 
 ---
+## 2026-10-11 · React 后台落地（分支 `scenario/blog-admin`）
+
+**目标**：阶段一最后一块——React + Vite + Ant Design 5 管理后台，消费 Management API。
+
+**做了什么**：
+- **`scenarios/blog/admin`**：React 19 + antd 6 + Vite；无路由库（状态切视图，最小依赖）。
+  - **Token 登录门**：MANAGE_TOKEN 存 localStorage；
+  - **文章列表**：Table（标题/slug/状态/更新时间），`GET /api/v1/posts?status=all`；
+  - **编辑/新建**：Form（title/slug/status）+ Markdown textarea——保存时经
+    `markdownToPt()` 归一为 Portable Text（**铁律不破：入库永远是 PT 结构**）；
+    编辑回填经 `ptToMarkdown()` 反向转换；
+- **`modules/http` 扩展**：`staticDir` 选项——Hono 托管后台静态资源 + SPA 兜底到 index.html；
+  **边界守死**：未匹配的 `/api/*` 路径回 404 JSON，绝不被 SPA 兜底吞掉（新增回归测试锁定）。
+- **Makefile**：`build-admin`（tsc admin 配置 + vite build → dist/admin）；`package` 打包时携带
+  `dist/admin`（解压即得完整"API + 后台"自包含包）。
+- **双 tsconfig**：根（后端，strict + node types）/ `tsconfig.admin.json`（JSX + DOM），互不污染。
+
+**遇到的问题 / 解决**：
+- **问题**：SPA 兜底中间件把未匹配的 API 路径也返回了 index.html（200）。
+  → **解决**：兜底前加守卫——`/api/*` 与 `/healthz` 未匹配时直接 404 JSON；补回归测试。
+- **问题**：Vite `outDir` 相对路径按 4 级上跳算出了项目根之外。
+  → **解决**：修正为 `../../../dist/admin`；冒烟时以 `ls` 验证产物位置。
+
+**验证结果（机器判定）**：
+- 全套测试 **65/65**（新增 PT 归一/往返 6 个 + SPA 边界 1 个）。
+- 端到端冒烟：`/admin` 返回后台 HTML、静态资源 200、SPA 深路由兜底 200、
+  `/api/unknown` → 404 JSON、`/api/manage/v1/*` 未带凭证 401、管理 API 建文 201。
+
+**遗留 / 下一步**：
+- [x] 合并 `scenario/blog-admin` → `main`
+- [ ] 块编辑器（Portable Text 可视化编辑，阶段二；当前 Markdown 模式够用）
+- [ ] authz 模块（RBAC）替换 Bearer Token 守卫
+
+---
