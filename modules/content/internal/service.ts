@@ -1,8 +1,10 @@
 // modules/content/internal/service.ts
 // ContentService 的最小实现：以 StorageDriver 为底座。
+// 类型定义是数据（决策 #26 逻辑 Schema）：落 content_types 表，读写经驱动。
 // 内部实现——禁止外部 import。
 
 import type { Entity, EntityTypeDef } from '@kernel/primitives/entity.js';
+import type { Principal } from '@kernel/primitives/principal.js';
 import type {
   ContentCreateInput,
   ContentPage,
@@ -13,9 +15,10 @@ import type {
 import type { StorageDriver } from '@kernel/contracts/storage.contract.js';
 import { newId, notDeleted } from '@kernel/primitives/id.js';
 import { platformError, type Result, ok, err } from '@kernel/primitives/result.js';
-import { validateEntityData } from './validate.js';
+import { validateEntityData, validateTypeDef } from './validate.js';
 
 const TABLE = 'entries';
+const TYPES_TABLE = 'content_types';
 
 interface EntryRow {
   id: string;
@@ -30,14 +33,81 @@ interface EntryRow {
   deletedAt: number;
 }
 
-export function createContentService(
-  driver: StorageDriver,
-  getTypeDef: (type: string, tenantId: string) => EntityTypeDef | undefined
-): ContentService {
+interface ContentTypeRow {
+  id: string;
+  tenantId: string;
+  slug: string;
+  schema: EntityTypeDef;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export function createContentService(driver: StorageDriver): ContentService {
   const svc = {
-    async defineType(): Promise<void> {
-      // 类型定义由 content 模块在 setup 时通过内部注册表管理；
-      // 此处保留契约方法（阶段一先内存态，后续落 content_types 表）。
+    /** 定义/更新内容类型：落 content_types（逻辑 Schema，不迁移旧数据）。
+     *  actor.tenantId 为 '*' 时写入通配定义（代码内建类型的种子）。 */
+    async defineType(def: EntityTypeDef, actor: Principal): Promise<void> {
+      const problems = validateTypeDef(def);
+      if (problems.length > 0) {
+        throw mapError(platformError('E_VALIDATION', `类型定义非法: ${def.slug}`, { issues: problems }));
+      }
+      const tenantId = actor.tenantId;
+      const now = Date.now();
+      await driver.transaction(async (tx) => {
+        const existing = await tx.findOne<ContentTypeRow>({
+          table: TYPES_TABLE,
+          where: { tenantId, slug: def.slug },
+        });
+        if (existing) {
+          await tx.update<ContentTypeRow>(TYPES_TABLE, existing.id, {
+            schema: def,
+            updatedAt: now,
+          });
+        } else {
+          await tx.insert(TYPES_TABLE, {
+            id: newId(),
+            tenantId,
+            slug: def.slug,
+            schema: def,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      });
+    },
+
+    async listTypes(tenantId: string): Promise<EntityTypeDef[]> {
+      // 精确租户 + '*' 通配（内建类型）；QuerySpec 仅等值，两次查询合并
+      const [own, wildcard] = await Promise.all([
+        driver.transaction((tx) =>
+          tx.find<ContentTypeRow>({ table: TYPES_TABLE, where: { tenantId } })
+        ),
+        tenantId === '*'
+          ? Promise.resolve([])
+          : driver.transaction((tx) =>
+              tx.find<ContentTypeRow>({ table: TYPES_TABLE, where: { tenantId: '*' } })
+            ),
+      ]);
+      const seen = new Set<string>();
+      return [...own, ...wildcard]
+        .filter((r) => (seen.has(r.slug) ? false : (seen.add(r.slug), true)))
+        .map((r) => r.schema);
+    },
+
+    async getType(slug: string, tenantId: string): Promise<EntityTypeDef | null> {
+      return svc.loadTypeDef(slug, tenantId); // 闭包自引用（解构安全，同 svc 约定）
+    },
+
+    /** 类型解析：先精确租户，再 '*' 通配（代码内建类型种子） */
+    async loadTypeDef(slug: string, tenantId: string): Promise<EntityTypeDef | null> {
+      const row = await driver.transaction((tx) =>
+        tx.findOne<ContentTypeRow>({ table: TYPES_TABLE, where: { tenantId, slug } })
+      );
+      if (row) return row.schema;
+      const wildcard = await driver.transaction((tx) =>
+        tx.findOne<ContentTypeRow>({ table: TYPES_TABLE, where: { tenantId: '*', slug } })
+      );
+      return wildcard?.schema ?? null;
     },
 
     async find(query: ContentQuery): Promise<ContentPage> {
@@ -74,7 +144,7 @@ export function createContentService(
     },
 
     async create(input: ContentCreateInput): Promise<Entity> {
-      const typeDef = getTypeDef(input.type, input.tenantId);
+      const typeDef = await svc.loadTypeDef(input.type, input.tenantId);
       if (!typeDef) {
         throw mapError(platformError('E_TYPE_UNKNOWN', `未定义的内容类型: ${input.type}`));
       }
@@ -108,7 +178,7 @@ export function createContentService(
       if (!current) {
         throw mapError(platformError('E_NOT_FOUND', `条目不存在: ${id}`));
       }
-      const typeDef = getTypeDef(current.type, input.tenantId);
+      const typeDef = await svc.loadTypeDef(current.type, input.tenantId);
       if (typeDef) {
         const check = validateEntityData(typeDef, { ...current.data, ...input.data });
         if (!check.ok) {

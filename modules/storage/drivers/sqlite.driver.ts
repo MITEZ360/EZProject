@@ -125,6 +125,11 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
 
   let txDepth = 0; // 事务深度：0=无事务；嵌套用 SAVEPOINT（见契约"事务语义"）
 
+  // 并发互斥：单连接上重叠的 transaction() 调用会交错 BEGIN/SAVEPOINT/COMMIT，
+  // 相互污染（实测：Promise.all 两个事务 → "no such savepoint"）。
+  // 外层调用排队串行；嵌套调用（txDepth>0）在当前事务流内直接放行，否则死锁。
+  let txTail: Promise<unknown> = Promise.resolve();
+
   const makeTx = (): StorageTx => ({
     async find<T>(spec: QuerySpec): Promise<T[]> {
       const { sql, params } = buildSelect(spec);
@@ -210,35 +215,45 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
       db.exec(DDL);
     },
     async transaction<T>(fn: (tx: StorageTx) => Promise<T>): Promise<T> {
-      txDepth += 1;
-      const sp = `sp_${txDepth}`;
-      const isOutermost = txDepth === 1;
-      if (isOutermost) {
-        db.exec('BEGIN'); // DEFERRED：WAL 下纯读不阻塞其他连接写
-      } else {
-        db.exec(`SAVEPOINT ${sp}`);
-      }
-      try {
-        const result = await fn(makeTx());
+      const runTx = async (): Promise<T> => {
+        txDepth += 1;
+        const sp = `sp_${txDepth}`;
+        const isOutermost = txDepth === 1;
         if (isOutermost) {
-          db.exec('COMMIT');
+          db.exec('BEGIN'); // DEFERRED：WAL 下纯读不阻塞其他连接写
         } else {
-          db.exec(`RELEASE ${sp}`);
+          db.exec(`SAVEPOINT ${sp}`);
         }
-        return result;
-      } catch (e) {
-        if (isOutermost) {
-          try { db.exec('ROLLBACK'); } catch { /* 连接已异常时回滚本身可能失败，保原始错误 */ }
-        } else {
-          db.exec(`ROLLBACK TO ${sp}`);
-          db.exec(`RELEASE ${sp}`);
-          // 注意：嵌套回滚只回滚到保存点，外层事务仍活着；
-          // 外层是否整体失败由外层 fn 自己的 try/catch 决定（契约语义 2/3）。
+        try {
+          const result = await fn(makeTx());
+          if (isOutermost) {
+            db.exec('COMMIT');
+          } else {
+            db.exec(`RELEASE ${sp}`);
+          }
+          return result;
+        } catch (e) {
+          if (isOutermost) {
+            try { db.exec('ROLLBACK'); } catch { /* 连接已异常时回滚本身可能失败，保原始错误 */ }
+          } else {
+            db.exec(`ROLLBACK TO ${sp}`);
+            db.exec(`RELEASE ${sp}`);
+            // 注意：嵌套回滚只回滚到保存点，外层事务仍活着；
+            // 外层是否整体失败由外层 fn 自己的 try/catch 决定（契约语义 2/3）。
+          }
+          throw e;
+        } finally {
+          txDepth -= 1;
         }
-        throw e;
-      } finally {
-        txDepth -= 1;
-      }
+      };
+
+      if (txDepth > 0) return runTx(); // 嵌套：已在当前事务流内（SAVEPOINT 语义）
+      const run = txTail.then(runTx);
+      txTail = run.then(
+        () => undefined,
+        () => undefined
+      );
+      return run;
     },
     async close(): Promise<void> {
       db.close();

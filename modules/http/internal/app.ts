@@ -86,6 +86,34 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     await next();
   });
 
+  // ---------- 类型管理（决策 #26：类型定义是数据） ----------
+  // 注意：必须注册在 /:type 通配路由之前
+
+  // GET /api/manage/v1/types —— 类型定义列表
+  manage.get('/types', async (c) => {
+    const tenantId = c.get('tenantId') as string;
+    return c.json({ items: await deps.content.listTypes(tenantId) });
+  });
+
+  // POST /api/manage/v1/types —— 定义/更新内容类型（逻辑 Schema，不迁移旧数据）
+  manage.post('/types', async (c) => {
+    const principal = c.get('principal') as Principal;
+    const tenantId = c.get('tenantId') as string;
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return c.json({ error: { code: 'E_VALIDATION', message: '请求体必须是 JSON 对象' } }, 400);
+    }
+    try {
+      await deps.content.defineType(body as Parameters<typeof deps.content.defineType>[0], {
+        ...principal,
+        tenantId, // 类型定义落当前操作租户名下
+      });
+      return c.json({ ok: true }, 201);
+    } catch (e) {
+      return c.json(errorBody(e), statusOf(e));
+    }
+  });
+
   // POST /api/manage/v1/:type —— 创建
   manage.post('/:type', async (c) => {
     const principal = c.get('principal') as Principal;

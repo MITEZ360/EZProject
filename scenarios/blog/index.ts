@@ -13,8 +13,9 @@ export const blogTypes: EntityTypeDef[] = [
   {
     slug: 'posts',
     fields: [
+      // 注意：slug/status 是保留键（顶层物理列），不是 data 字段——
+      // 从 data.slug 提升至列由 content 服务负责，需要强唯一性的值走这条通道
       { name: 'title', type: 'text', required: true },
-      { name: 'slug', type: 'text', required: true },
       { name: 'body', type: 'richText', required: true },
       { name: 'featured', type: 'boolean' },
     ],
