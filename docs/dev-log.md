@@ -35,6 +35,8 @@
 - 完成需求澄清、架构设计、技术选型、内容层设计。
 - 产出两份核心文档：`docs/design.md`（设计）、`docs/engineering-spec.md`（工程规范）。
 - 建立文档体系（README / dev-log / changelog / cookbook）。
+- **初始化本地 git 仓库**，完成首次提交（`7d7e0c4`）。
+- **补充 vibe-cookbook**：新增"给 AI 定框架的元方法"章节，精简冗余条目。
 
 **关键决策（按讨论顺序）**：
 
