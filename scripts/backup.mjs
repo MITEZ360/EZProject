@@ -25,8 +25,12 @@ if (!existsSync(dbPath)) {
 }
 
 // 时间戳目录：20261011-203116
-const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
-const dir = join(outRoot, stamp);
+// 毫秒精度：秒级会在"同一秒内连续两次备份"时撞目录，
+// 而 VACUUM INTO 拒绝写已存在文件——定时任务重试就会直接失败。
+const stamp = new Date().toISOString().slice(0, 23).replace(/[-:]/g, '').replace('T', '-').replace('.', '');
+let dir = join(outRoot, stamp);
+// 仍撞名（毫秒内不可能，但保险）则加序号
+for (let i = 2; existsSync(dir); i++) dir = join(outRoot, `${stamp}-${i}`);
 mkdirSync(dir, { recursive: true });
 
 const db = new Database(dbPath, { readonly: true });

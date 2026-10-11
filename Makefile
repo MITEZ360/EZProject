@@ -6,7 +6,7 @@
 # 运行时说明：验证链走 Node（npm run），因为 better-sqlite3 原生模块在 Bun 下不可用；
 # Bun 只用于依赖安装与构建加速。详见 docs/dev-log.md。
 
-.PHONY: help install dev typecheck lint test verify verify-full check build package clean
+.PHONY: help install dev typecheck lint test verify verify-full check build package clean backup backup-list backup-inspect restore restore-dry backup-rotate backup-cron
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -73,6 +73,31 @@ package: ## 产出压缩包（自包含交付：app + node_modules + admin + 说
 backup: ## 备份数据（DB 一致性快照 + 全表 JSON + 媒体文件）→ backups/<时间戳>/
 	@mkdir -p backups
 	node scripts/backup.mjs ./data/app.db ./backups
+
+backup-list: ## 列出可用备份（最新在前）
+	node scripts/restore.mjs --list ./backups
+
+backup-inspect: ## 查看某份备份的清单（用法：make backup-inspect DIR=backups/<时间戳>）
+	@test -n "$(DIR)" || { echo "用法: make backup-inspect DIR=backups/20261011-203116"; exit 1; }
+	node scripts/restore.mjs "$(DIR)" --inspect
+
+restore-dry: ## 演练恢复（不改动任何数据；用法：make restore-dry DIR=backups/<时间戳>）
+	@test -n "$(DIR)" || { echo "用法: make restore-dry DIR=backups/20261011-203116"; exit 1; }
+	node scripts/restore.mjs "$(DIR)" --db ./data/app.db --dry-run
+
+restore: ## 从备份恢复（先演练再执行；用法：make restore DIR=backups/<时间戳>，非交互加 YES=1）
+	@test -n "$(DIR)" || { echo "用法: make restore DIR=backups/20261011-203116 YES=1"; exit 1; }
+	node scripts/restore.mjs "$(DIR)" --db ./data/app.db --dry-run
+	$(MAKE) restore-run DIR="$(DIR)"
+
+restore-run:
+	node scripts/restore.mjs "$(DIR)" --db ./data/app.db $(if $(YES),--yes,)
+
+backup-rotate: ## 备份轮转（GFS 保留：小时24/天14/周8/月12；演练加 DRY=1）
+	node scripts/backup-rotate.mjs --dir ./backups $(if $(DRY),--dry-run,)
+
+backup-cron: ## 定时任务的唯一入口：备份 + 轮转（crontab / systemd 调这个）
+	node scripts/backup-cron.mjs
 
 clean: ## 清理构建产物
 	rm -rf dist coverage data

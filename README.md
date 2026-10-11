@@ -113,6 +113,8 @@ scripts/     边界扫描：内核词汇 / 方言分支 / 契约快照
 | [docs/git-workflow.md](./docs/git-workflow.md) | **分支策略**：kernel/main 双长期分支、命名规范、内核把关 |
 | [docs/vibe-cookbook.md](./docs/vibe-cookbook.md) | **AI 协作开发经验**：踩坑记录、有效/无效的提示 |
 | [docs/dev-log.md](./docs/dev-log.md) | **开发记录**：按时间记录做了什么、为什么 |
+| [docs/operations.md](./docs/operations.md) | **运维手册**：数据风险地图、备份/恢复演练、发版、监控清单 |
+| [docs/backup-schedule.md](./docs/backup-schedule.md) | **定时备份**：crontab / systemd timer 两种装法与保留策略调参 |
 | [CHANGELOG.md](./CHANGELOG.md) | **变更日志**：按版本记录对外变更 |
 
 ## 贡献约定

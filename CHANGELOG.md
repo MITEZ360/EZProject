@@ -22,6 +22,9 @@
 - **6 张模块私有表改声明式**：`audit_logs`、`auth_users`、`auth_roles`、`auth_refresh_tokens`、`assets`、`settings`；`bool` 列在 PG 落原生 `BOOLEAN`（原 codec 把 boolean 转 0/1，等于迁就了错误的列类型），JSON 列 PG 侧统一 `TEXT`（与驱动内置表一致）
 
 ### Fixed
+- **备份/恢复在同一秒内连续执行必然失败**：`VACUUM INTO` 拒绝写已存在文件，而两个脚本的时间戳只精确到秒。定时任务重试、脚本连跑两次、备份+恢复紧挨着——都会直接报错。现在时间戳改为毫秒 + 序号兜底
+- **`media` 目录恢复失败**（恢复脚本首次实现时）：`cpSync` 缺 `recursive: true`，媒体恢复路径必然抛 `Recursive option not enabled`
+- **损坏的备份快照能覆盖生产库**（严重）：原先只跑 `integrity_check`，而页内容损坏时它仍返回 ok——真正的崩溃发生在覆盖之后读数据时，那时生产库已被毁。现在校验会**逐表真读一遍**，且快照打不开 / `integrity_check` 抛错 / 恢复后库打不开三种情况都收敛为友好提示 + 明确回退指引，并保证目标库分毫未动
 - **`update` 只合并 `data`，顶层 `slug` / `status` 永远改不动**：`ContentService.update` 此前把输入全部塞进 `data`（`{...current.data, ...input.data}`），于是顶层保留列既不更新、`data` 里还多出同名字段——与 `create` 行为不一致，表现为"改完 slug 但 URL 不变"。现从输入中提取保留键、更新顶层列并从 `data` 删除
 - **`Entity` 原语遗漏顶层保留字段 `slug`**：内核内容原语的顶层字段清单缺 `slug`，与实际建表列不一致（模块按契约拼顶层字段时会漏掉它）
 - **模块私有表在 PG 上因物理类型溢出而完全不可用**（6 处 / 5 张表）：`INTEGER` 在 SQLite 是 64 位动态类型、在 PG 只有 32 位，epoch 毫秒直接溢出 → `audit` / `authz`（用户、角色、刷新令牌）/ `media` / `settings` 的写入全部失败。**根因（模块手写物理类型）已由声明式建表从机制上消除**
@@ -32,6 +35,14 @@
 - **SQLite 数据文件父目录不存在时启动失败**：驱动现在自动创建父目录。原先抛的是英文原生错误 `Cannot open database because the directory does not exist`，与"解压即用"的定位不符（实测踩到：清空 `data/` 后服务直接起不来）
 
 ### Added
+- **`scripts/restore.mjs`（备份恢复）**：`--list` / `--inspect` / `--dry-run` 三种只读模式先看再动；恢复前**自动留底** `pre-restore-<时间戳>.db`（回退路径永远存在）；恢复后逐表比对行数与清单并显式报出差异；媒体经临时目录换名式替换（中断不留半截文件）；非交互环境必须显式 `--yes`，不会静默覆盖
+- **`scripts/backup-rotate.mjs`（保留策略）**：GFS 保留法（默认小时 24 / 天 14 / 周 8 / 月 12，约 58 份），**最新一份永不删除**；逐档按时间桶占槽而非"距今 N 天"（备份断档时不会连带删掉该窗口唯一一份可用备份）；支持 `--dry-run` 预演与 `KEEP_*` 环境变量调参
+- **`scripts/backup-cron.mjs`（定时入口）**：备份 + 轮转绑成一个原子步骤——拆成两条 cron 命令意味着两者可能只成功一半（备份成了但轮转没跑会占满磁盘；轮转跑了但备份没成功等于净损失）。退出码非 0 让 cron/监控能发现
+- **运维手册 `docs/operations.md`**：数据风险地图（点明媒体文件只存引用 ID、不在 DB 备份内）、备份/恢复/发版全流程、定期演练要求、监控清单、常见故障表
+- **定时备份文档 `docs/backup-schedule.md`**：crontab 与 systemd timer 两种装法、错开整点的理由、保留策略调参与告警建议
+- **Makefile 运维目标**：`backup-list` / `backup-inspect` / `restore-dry` / `restore` / `backup-rotate` / `backup-cron`
+- **发版流水线 `.github/workflows/release.yml`**：tag 触发，校验 tag 与 `package.json` 版本一致（不一致直接拒绝发布，避免下载到版本号对不上内容的产物）→ `verify-full` → `make package` → 隔离目录解压自检 → 附 sha256 校验和创建 GitHub Release；也支持手动触发
+- **`test/e2e/backup.test.ts`**：13 项端到端测试真跑脚本（快照可独立打开且大整数未被截断、`--inspect` 无副作用、dry-run 不落盘、恢复回到备份时刻的值、恢复前留底可回退、坏快照被拒且目标库未动、轮转淘汰与最新必留、同一秒内连续备份不撞名）
 - **`modules/revision`（版本历史 / 回滚）**：新增内核契约 `RevisionService`（`list/get/rollback`）；订阅内容变更事件保存**完整 `data` 快照**（回滚无歧义，不做增量 diff），含操作者、时间与变更来源；管理 API `/api/manage/v1/entries/:type/:id/revisions`（列表 / 详情 / 回滚）；表结构走声明式建表
 - **`modules/scheduler`（定时发布）**：新增内核契约 `ScheduleService`（`schedule/cancel/get/list`）；模块只负责**计划管理**，到期执行由轮询侧完成（无额外常驻进程，横向扩容天然安全）；目标条目已删除时到期不报错、计划照常清理（不卡死重试）；管理 API `/api/manage/v1/schedules`
 - **Content API 支持 `?fields=a,b` 字段裁剪**：只投影 `data` 里的指定字段（顶层结构列 id/slug/status/时间不参与裁剪，否则调用方无法定位条目）；未知字段名忽略（不报错也不凭空造键）；缓存键含完整 query，不同裁剪各自成条目、互不串味。列表、详情、搜索三处一致生效
