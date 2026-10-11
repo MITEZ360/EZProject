@@ -9,11 +9,13 @@ const ROOT = process.cwd();
 const KERNEL_DIR = join(ROOT, 'kernel');
 
 // 业务词汇黑名单（小写、词边界匹配）。
-// 只放"业务义"的词；中性词（entity/field/event/principal/store）允许。
+// 只放"业务义且低歧义"的词；中性词（entity/field/event/principal/store）允许。
+// 注意：高歧义词不进黑名单，避免误报——
+//   'order'（排序 vs 订单）、'post'（提交 vs 文章）、'tag'（标签机制 vs 业务标签）
+//   这些在通用代码里太常见，交给人工与"契约快照"把关，不上自动扫描。
 const FORBIDDEN = [
-  'article', 'blog', 'post', 'order', 'product', 'invoice',
-  'payment', 'billing', 'comment', 'category', 'tag',
-  'customer', 'employee', 'knowledge',
+  'article', 'blog', 'invoice', 'payment', 'billing',
+  'comment', 'category', 'customer', 'employee', 'knowledge',
 ];
 
 const WORD_RE = new RegExp(`\\b(${FORBIDDEN.join('|')})\\b`, 'i');

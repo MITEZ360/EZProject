@@ -3,7 +3,7 @@
 // 唯一允许出现方言判断的地方：modules/storage/factory.ts 与 registry.ts。
 // 用法：node scripts/check-no-dialect.mjs
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, relative } from 'node:path';
 
 const ROOT = process.cwd();
 const SCAN_DIRS = ['kernel', 'modules', 'scenarios'];
