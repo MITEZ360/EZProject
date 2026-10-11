@@ -28,5 +28,5 @@
     }
   },
   "include": ["kernel", "modules", "scenarios", "test", "scripts"],
-  "exclude": ["node_modules", "dist", "web", "scenarios/blog/admin"]
+  "exclude": ["node_modules", "dist", "web", "scenarios/generic-cms/admin"]
 }

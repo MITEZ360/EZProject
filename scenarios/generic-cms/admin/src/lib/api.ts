@@ -32,30 +32,32 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return json as T;
 }
 
-export interface PostListItem {
+export interface EntryItem {
   id: string;
+  type: string;
   slug?: string;
   status: string;
   locale: string;
   updatedAt: number;
-  data: { title?: string; body?: unknown };
+  data: Record<string, unknown>;
 }
 
+/** 通用内容 API：类型只是路径参数——通用 CMS 不写死任何业务类型 */
 export const api = {
-  listPosts: (type = 'posts') =>
-    request<{ items: PostListItem[]; total: number }>(
+  listEntries: (type: string) =>
+    request<{ items: EntryItem[]; total: number }>(
       'GET',
       `/api/v1/${type}?status=all&limit=100`
     ),
 
-  createPost: (data: Record<string, unknown>) =>
-    request<PostListItem>('POST', '/api/manage/v1/posts', data),
+  createEntry: (type: string, data: Record<string, unknown>) =>
+    request<EntryItem>('POST', `/api/manage/v1/${type}`, data),
 
-  updatePost: (id: string, data: Record<string, unknown>) =>
-    request<PostListItem>('PUT', `/api/manage/v1/posts/${id}`, data),
+  updateEntry: (type: string, id: string, data: Record<string, unknown>) =>
+    request<EntryItem>('PUT', `/api/manage/v1/${type}/${id}`, data),
 
-  deletePost: (id: string) =>
-    request<{ ok: boolean }>('DELETE', `/api/manage/v1/posts/${id}`),
+  deleteEntry: (type: string, id: string) =>
+    request<{ ok: boolean }>('DELETE', `/api/manage/v1/${type}/${id}`),
 
   health: () => request<{ ok: boolean }>('GET', '/healthz'),
 };

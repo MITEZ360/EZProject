@@ -347,3 +347,27 @@ engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/ed
 - [ ] 通用管理模块（authz / audit / settings + 通用 admin 壳）
 
 ---
+
+## 2026-10-11 · 管理端归位：blog admin → 通用 CMS admin（分支 `feature/generic-admin`）
+
+**背景**：用户复核指出架构偏差——通用管理能力（登录壳/类型管理/内容编辑）不该放在
+`scenarios/blog/admin`；按既定决策（"通用 admin 壳 + 模块贡献页面"）与自查原则
+（"两个场景都会用的能力不进场景目录"），博客这类具体场景应该最后做、复用通用件。
+
+**重构**：
+- `scenarios/blog/admin` → **`scenarios/generic-cms/admin`**（git mv，历史保留）
+- **App 壳通用化**：登录门 + 菜单（内容/类型管理），零业务词汇；未来 authz/audit/settings 页面在此壳下扩展
+- **内容视图动态化**：选类型 → 列表列按类型定义前 3 个字段生成 → 编辑表单**按调色板逐类型渲染控件**
+  （text/longText/number/boolean/date(DatePicker→epoch ms)/select(单多选)/richText(Markdown 归一)/
+  relation/media(ID)/json/component(JSON 文本)）——**零写死字段**
+- API 客户端通用化：`listEntries(type)` 等，类型只是路径参数
+- 构建配置同步（vite root / 双 tsconfig include/exclude）；博客场景保留 posts 类型种子，复用本壳
+
+**验证**：
+- 双 tsc + eslint + vite build + 全套 86/86 全绿
+- 冒烟：同一 admin 下动态定义 `products`（date/boolean 字段）与内建 `posts` 各建条目成功，类型列表两者齐现——
+  证明壳确实类型无关
+
+**沉淀**：通用能力归位模块层/通用场景；具体场景 = 类型种子 + 前台展示（待做）+ 场景特有配置。
+
+---

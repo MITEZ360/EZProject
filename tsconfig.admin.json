@@ -28,5 +28,5 @@
       "@scenarios/*": ["scenarios/*"]
     }
   },
-  "include": ["scenarios/blog/admin/src", "vite.config.ts"]
+  "include": ["scenarios/generic-cms/admin/src", "vite.config.ts"]
 }
