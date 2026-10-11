@@ -14,6 +14,8 @@ import { searchModule } from '@modules/search/index.js';
 import { webhookModule } from '@modules/webhook/index.js';
 import { auditModule } from '@modules/audit/index.js';
 import { settingsModule } from '@modules/settings/index.js';
+import { revisionModule } from '@modules/revision/index.js';
+import { schedulerModule } from '@modules/scheduler/index.js';
 
 export interface GenericCmsOptions {
   dialect?: 'sqlite' | 'postgres' | 'mysql';
@@ -45,7 +47,13 @@ export async function createGenericCmsApp(options: GenericCmsOptions = {}): Prom
       mediaModule(options.media), // 媒体资产（local 策略）
       searchModule(), // 全文检索（按方言选策略：SQLite=FTS5 / PG=tsvector；索引随内容事件增量更新）
       ...(withAdmin
-        ? [auditModule(), settingsModule(), webhookModule()] // webhook 依赖 settings
+        ? [
+            auditModule(),
+            settingsModule(),
+            webhookModule(), // webhook 依赖 settings
+            revisionModule(), // 内容版本历史（订阅内容事件留快照）
+            schedulerModule(), // 定时发布（轮询到期计划）
+          ]
         : []),
       ...(options.http ? [httpModule({ ...options.http, tenantId: options.tenantId })] : []),
     ],

@@ -78,6 +78,8 @@ platform/
 │   │   ├── authz.contract.ts      #   权限能力契约
 │   │   ├── storage.contract.ts    #   存储抽象（策略接口）
 │   │   ├── search.contract.ts     #   搜索抽象（策略接口）
+│   │   ├── revision.contract.ts   #   版本历史/回滚契约
+│   │   ├── schedule.contract.ts   #   定时发布契约（只管计划，执行方轮询）
 │   │   └── module.contract.ts     #   模块接入契约（扩展点）
 │   ├── events/
 │   │   ├── bus.ts                 #   事件总线实现（内核唯一实现）

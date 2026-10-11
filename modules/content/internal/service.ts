@@ -212,6 +212,15 @@ export function createContentService(
         data: { ...current.data, ...input.data },
         updatedAt: Date.now(),
       };
+      // slug / status 是**顶层保留列**（不是 data 字段）：与 create 一样必须从入参里提出来落列。
+      // 原先漏了这一步 —— PUT 请求体里明明带着 status / slug，保存后却不生效
+      // （后台"状态"下拉改了没用、slug 改了没用），是一处静默失效。
+      if ('slug' in input.data) {
+        patch['slug'] = typeof input.data['slug'] === 'string' ? input.data['slug'] : null;
+      }
+      if (typeof input.data['status'] === 'string') {
+        patch['status'] = input.data['status'];
+      }
       const updated = await driver.transaction((tx) =>
         tx.update<EntryRow>(TABLE, id, patch)
       );

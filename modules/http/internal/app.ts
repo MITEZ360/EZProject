@@ -14,6 +14,8 @@ import type { AuthzService } from '@kernel/contracts/authz.contract.js';
 import type { AssetStore } from '@kernel/contracts/asset.contract.js';
 import type { CacheProvider } from '@kernel/contracts/cache.contract.js';
 import type { SearchProvider } from '@kernel/contracts/search.contract.js';
+import type { RevisionService } from '@kernel/contracts/revision.contract.js';
+import type { ScheduleService } from '@kernel/contracts/schedule.contract.js';
 import { newId } from '@kernel/primitives/id.js';
 import { mountAuthRoutes } from './auth-routes.js';
 import type { Principal } from '@kernel/primitives/principal.js';
@@ -393,6 +395,73 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
   });
 
   // GET /api/manage/v1/audit-logs（audit 模块贡献；未加载 → 404 JSON）
+  // ---------- 版本历史（revision 模块贡献；未加载 → 404） ----------
+  // 固定路径必须注册在下面的 /:type 通配之前（与 audit-logs / settings 同理）
+  manage.get('/revisions/:type/:id', async (c) => {
+    const revisions = deps.registry.get<RevisionService>('revision');
+    if (!revisions) return notFound(c);
+    const tenantId = c.get('tenantId') as string;
+    const limit = c.req.query('limit') ? Math.min(Number(c.req.query('limit')), 200) : 50;
+    return c.json({ items: await revisions.list(c.req.param('id'), tenantId, limit) });
+  });
+
+  manage.post('/revisions/:type/:id/rollback/:version', async (c) => {
+    const revisions = deps.registry.get<RevisionService>('revision');
+    if (!revisions) return notFound(c);
+    const principal = c.get('principal') as Principal;
+    const tenantId = c.get('tenantId') as string;
+    // 回滚是写操作：鉴权按目标类型 + update 动作
+    const auth = await authorize(c, c.req.param('type'), 'update');
+    if ('denied' in auth) return auth.denied;
+    const version = Number(c.req.param('version'));
+    if (!Number.isInteger(version) || version < 1) {
+      return c.json({ error: { code: 'E_VALIDATION', message: '版本号必须为正整数' } }, 400);
+    }
+    try {
+      const entity = await revisions.rollback(c.req.param('id'), tenantId, version, principal);
+      return c.json(entity);
+    } catch (e) {
+      return c.json(errorBody(e), statusOf(e));
+    }
+  });
+
+  // ---------- 定时发布（scheduler 模块贡献） ----------
+  manage.get('/schedules', async (c) => {
+    const schedule = deps.registry.get<ScheduleService>('schedule');
+    if (!schedule) return notFound(c);
+    return c.json({ items: await schedule.list(c.get('tenantId') as string) });
+  });
+
+  manage.put('/schedules/:type/:id', async (c) => {
+    const schedule = deps.registry.get<ScheduleService>('schedule');
+    if (!schedule) return notFound(c);
+    const tenantId = c.get('tenantId') as string;
+    const body = (await c.req.json().catch(() => null)) as { publishAt?: unknown } | null;
+    const publishAt = body?.publishAt;
+    if (typeof publishAt !== 'number' || !Number.isFinite(publishAt)) {
+      return c.json(
+        { error: { code: 'E_VALIDATION', message: 'publishAt 必须是 epoch 毫秒数字' } },
+        400
+      );
+    }
+    const auth = await authorize(c, c.req.param('type'), 'update');
+    if ('denied' in auth) return auth.denied;
+    const item = await schedule.schedule({
+      entryId: c.req.param('id'),
+      tenantId,
+      type: c.req.param('type'),
+      publishAt,
+    });
+    return c.json(item);
+  });
+
+  manage.delete('/schedules/:type/:id', async (c) => {
+    const schedule = deps.registry.get<ScheduleService>('schedule');
+    if (!schedule) return notFound(c);
+    await schedule.cancel(c.req.param('id'), c.get('tenantId') as string);
+    return c.json({ ok: true });
+  });
+
   manage.get('/audit-logs', async (c) => {
     const audit = deps.registry.get<AuditService>('audit');
     if (!audit) return notFound(c);

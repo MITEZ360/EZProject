@@ -22,6 +22,8 @@
 - **6 张模块私有表改声明式**：`audit_logs`、`auth_users`、`auth_roles`、`auth_refresh_tokens`、`assets`、`settings`；`bool` 列在 PG 落原生 `BOOLEAN`（原 codec 把 boolean 转 0/1，等于迁就了错误的列类型），JSON 列 PG 侧统一 `TEXT`（与驱动内置表一致）
 
 ### Fixed
+- **`update` 只合并 `data`，顶层 `slug` / `status` 永远改不动**：`ContentService.update` 此前把输入全部塞进 `data`（`{...current.data, ...input.data}`），于是顶层保留列既不更新、`data` 里还多出同名字段——与 `create` 行为不一致，表现为"改完 slug 但 URL 不变"。现从输入中提取保留键、更新顶层列并从 `data` 删除
+- **`Entity` 原语遗漏顶层保留字段 `slug`**：内核内容原语的顶层字段清单缺 `slug`，与实际建表列不一致（模块按契约拼顶层字段时会漏掉它）
 - **模块私有表在 PG 上因物理类型溢出而完全不可用**（6 处 / 5 张表）：`INTEGER` 在 SQLite 是 64 位动态类型、在 PG 只有 32 位，epoch 毫秒直接溢出 → `audit` / `authz`（用户、角色、刷新令牌）/ `media` / `settings` 的写入全部失败。**根因（模块手写物理类型）已由声明式建表从机制上消除**
 - **`auth_roles.builtin` 在 PG 上被拒**：JS `boolean` 赋给整数列，PG 强类型报错（SQLite 会静默转 0/1）。现该列声明为 `bool`，PG 落原生 `BOOLEAN`，落库侧不再需要 0/1 转换
 - **超长 token 在 PG 上的静默错误**：>2046 字节的 token 被 PG 静默忽略，且落在短语中间会改变距离（`b <-> 超长 <-> c` 退化为 `b <2> c`）——查询语义被悄悄改变却仍"成功"。改为在切分层统一丢弃（`MAX_TOKEN_BYTES`），保证两方言行为一致
@@ -30,6 +32,8 @@
 - **SQLite 数据文件父目录不存在时启动失败**：驱动现在自动创建父目录。原先抛的是英文原生错误 `Cannot open database because the directory does not exist`，与"解压即用"的定位不符（实测踩到：清空 `data/` 后服务直接起不来）
 
 ### Added
+- **`modules/revision`（版本历史 / 回滚）**：新增内核契约 `RevisionService`（`list/get/rollback`）；订阅内容变更事件保存**完整 `data` 快照**（回滚无歧义，不做增量 diff），含操作者、时间与变更来源；管理 API `/api/manage/v1/entries/:type/:id/revisions`（列表 / 详情 / 回滚）；表结构走声明式建表
+- **`modules/scheduler`（定时发布）**：新增内核契约 `ScheduleService`（`schedule/cancel/get/list`）；模块只负责**计划管理**，到期执行由轮询侧完成（无额外常驻进程，横向扩容天然安全）；目标条目已删除时到期不报错、计划照常清理（不卡死重试）；管理 API `/api/manage/v1/schedules`
 - **Content API 支持 `?fields=a,b` 字段裁剪**：只投影 `data` 里的指定字段（顶层结构列 id/slug/status/时间不参与裁剪，否则调用方无法定位条目）；未知字段名忽略（不报错也不凭空造键）；缓存键含完整 query，不同裁剪各自成条目、互不串味。列表、详情、搜索三处一致生效
 - **后台搜索视图**：消费 `/api/v1/search`（固定 `status=all` 以覆盖草稿），支持关键词 + 类型筛选；结果行可"打开"，跳到内容视图并直接弹出该条目编辑框（含 component 嵌套值完整回填）
 - **管理端字段编辑体验**：relation 改**内容选择器**（按标题搜索目标条目，不再手输 UUID）、component 改**递归嵌套表单**（repeatable 支持增删与上下移）、media 改**媒体库选择器**（缩略图 + 文件名 + 就地上传并自动选中）；新增可测的纯逻辑层 `lib/entry-format.ts`（标题探测 / 递归空值 / 存量数据规整），为此前零测试的 admin 补上 14 条单测
