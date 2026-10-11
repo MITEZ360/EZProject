@@ -171,8 +171,14 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
       }
     },
 
-    async exec(sql: string): Promise<void> {
-      db.exec(sql); // 调用方在事务内使用时随事务提交/回滚
+    async exec(sql: string, params: unknown[] = []): Promise<void> {
+      // 无参数 → exec（支持多条 DDL）；有参数 → prepare/run（单条，绑定安全）
+      if (params.length > 0) db.prepare(sql).run(...params);
+      else db.exec(sql); // 调用方在事务内使用时随事务提交/回滚
+    },
+
+    async query<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+      return db.prepare(sql).all(...params) as T[];
     },
 
     async insert<T>(table: string, data: T): Promise<T> {
