@@ -34,9 +34,17 @@ export interface StorageTx {
   findOne<T>(spec: QuerySpec): Promise<T | null>;
   /** 满足条件的行数（不取回数据；分页统计必须用它，禁止 find 后取 length） */
   count(spec: QuerySpec): Promise<number>;
-  /** 执行原生语句。仅限模块创建/维护**私有表**（如 audit/settings 的 DDL）；
-   *  共享业务数据一律走 find/insert/update/delete——禁止用 exec 绕过数据抽象。 */
-  exec(sql: string): Promise<void>;
+  /**
+   * 执行原生语句（DDL / 方言特有写操作），**支持参数绑定**（务必绑参，勿拼串）。
+   * **仅限模块私有表**（audit/settings/media/authz/search 等模块自建的表）；
+   * 共享业务数据（entries 等）一律走 find/insert/update/delete——禁止绕过数据抽象。
+   */
+  exec(sql: string, params?: unknown[]): Promise<void>;
+  /**
+   * 原生查询（返回行），支持参数绑定。用途与边界同 exec：**仅限模块私有表**，
+   * 且限于 `QuerySpec` 无法表达的方言特性（如 SQLite FTS5 的 `MATCH`）。
+   */
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
   insert<T>(table: string, data: T): Promise<T>;
   update<T>(table: string, id: string, patch: Partial<T>): Promise<T>;
   delete(table: string, id: string): Promise<void>;
