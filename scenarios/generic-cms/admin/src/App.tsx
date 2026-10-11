@@ -24,7 +24,10 @@ export default function App() {
   const probe = useCallback(async () => {
     try {
       await api.health();
-      if (hasSession()) await authApi.me(); // 令牌有效才进入
+      // 无会话直接留在登录页——原先此处漏了判断，导致 healthz 一通就
+      // setAuthed(true)，未登录也能进后台（数据接口各自 401，但门形同虚设）
+      if (!hasSession()) return;
+      await authApi.me(); // 令牌有效才进入
       setAuthed(true);
     } catch {
       /* 令牌失效：停留在登录页 */

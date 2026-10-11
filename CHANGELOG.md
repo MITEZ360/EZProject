@@ -25,8 +25,11 @@
 - **模块私有表在 PG 上因物理类型溢出而完全不可用**（6 处 / 5 张表）：`INTEGER` 在 SQLite 是 64 位动态类型、在 PG 只有 32 位，epoch 毫秒直接溢出 → `audit` / `authz`（用户、角色、刷新令牌）/ `media` / `settings` 的写入全部失败。**根因（模块手写物理类型）已由声明式建表从机制上消除**
 - **`auth_roles.builtin` 在 PG 上被拒**：JS `boolean` 赋给整数列，PG 强类型报错（SQLite 会静默转 0/1）。现该列声明为 `bool`，PG 落原生 `BOOLEAN`，落库侧不再需要 0/1 转换
 - **超长 token 在 PG 上的静默错误**：>2046 字节的 token 被 PG 静默忽略，且落在短语中间会改变距离（`b <-> 超长 <-> c` 退化为 `b <2> c`）——查询语义被悄悄改变却仍"成功"。改为在切分层统一丢弃（`MAX_TOKEN_BYTES`），保证两方言行为一致
+- **管理端认证门形同虚设**（安全）：`App.tsx` 的 `probe()` 中 `setAuthed(true)` 写在 `hasSession()` 判断**之外**，导致 healthz 一通就放行——未登录也能进入后台界面（数据接口各自 401，但门本身失守）。改为无会话直接停在登录页。**该缺陷由浏览器真机验证发现，typecheck 与 build 均无法暴露**
+- **管理端页面标题**：由"博客后台 · Headless CMS"（博客时代遗留文案）更正为"内容管理后台 · Headless CMS"
 
 ### Added
+- **管理端字段编辑体验**：relation 改**内容选择器**（按标题搜索目标条目，不再手输 UUID）、component 改**递归嵌套表单**（repeatable 支持增删与上下移）、media 改**媒体库选择器**（缩略图 + 文件名 + 就地上传并自动选中）；新增可测的纯逻辑层 `lib/entry-format.ts`（标题探测 / 递归空值 / 存量数据规整），为此前零测试的 admin 补上 14 条单测
 - **`modules/media`（媒体资产）**：AssetStore 策略（local 文件系统已实现，s3 预留）；防路径穿越；公开下载 + 长缓存；内容只存 asset id
 - **`modules/cache`（缓存）**：CacheProvider 策略（memory/none 已实现，redis 预留）；Content API 读路径接入 + 写操作事件驱动失效
 - **多语言回退**：实体级 locale，指定语言无结果回退 default

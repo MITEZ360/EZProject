@@ -106,10 +106,10 @@ export interface EntryItem {
 
 /** 通用内容 API：类型只是路径参数——通用 CMS 不写死任何业务类型 */
 export const api = {
-  listEntries: (type: string) =>
+  listEntries: (type: string, limit = 100) =>
     request<{ items: EntryItem[]; total: number }>(
       'GET',
-      `/api/v1/${type}?status=all&limit=100`
+      `/api/v1/${type}?status=all&limit=${limit}`
     ),
 
   createEntry: (type: string, data: Record<string, unknown>) =>
