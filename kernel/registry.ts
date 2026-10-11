@@ -50,6 +50,8 @@ export const Tokens = {
   Assets: 'assets',
   Cache: 'cache',
   Settings: 'settings',
+  Revision: 'revision',
+  Schedule: 'schedule',
 } as const;
 
 export type Token = (typeof Tokens)[keyof typeof Tokens];

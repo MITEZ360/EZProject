@@ -35,6 +35,15 @@
     "export interface ModuleContext {",
     "export interface PlatformModule {"
   ],
+  "kernel/contracts/revision.contract.ts": [
+    "export interface Revision {",
+    "export interface RevisionService {"
+  ],
+  "kernel/contracts/schedule.contract.ts": [
+    "export interface ScheduleItem {",
+    "export interface ScheduleInput {",
+    "export interface ScheduleService {"
+  ],
   "kernel/contracts/search.contract.ts": [
     "export interface SearchQuery {",
     "export interface SearchHit<T = Record<string, unknown>> {",
