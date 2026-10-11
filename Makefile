@@ -28,6 +28,13 @@ verify: typecheck lint test ## 日常验证（提交前跑这个）
 verify-full: verify ## 完整验证（里程碑/发版前）
 	npm run test:boot && npm run test:e2e
 
+test-pg: ## 在真实 PostgreSQL 上跑存储契约测试（跨方言验证；需 TEST_PG_URL）
+	@test -n "$(TEST_PG_URL)" || { \
+	  echo "用法: make test-pg TEST_PG_URL=postgres://user:pass@host:5432/db"; \
+	  echo "（PG 测试须串行——多文件并行会争抢同一个库的建表/清表）"; exit 1; }
+	TEST_PG_URL="$(TEST_PG_URL)" npx vitest run --no-file-parallelism \
+		test/unit/storage.test.ts test/unit/storage-filters.test.ts test/boot/postgres-e2e.test.ts
+
 build: build-admin ## 产出可运行产物（自包含包：内联 TS；原生模块保持 external）
 	bun build ./scenarios/generic-cms/main.ts --target=node --outfile dist/app.mjs \
 		--external better-sqlite3

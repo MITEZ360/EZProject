@@ -701,3 +701,50 @@ FTS5 默认的 `unicode61` 分词器**对中文基本不可用**——中文没�
 - [ ] 从备份恢复（当前需手工：停服 → 拷 app.db → 启动）
 
 ---
+
+## 2026-10-11 · PostgreSQL 驱动落地（分支 `feature/postgres-driver`）
+
+**缘起**：用户问"我没有 PG，你能验证吗"——能，且这次验证的价值不在"补功能"，
+而在**检验契约在第二个方言上是否真的成立**（"换配置可切库"是阶段一验收标准里
+唯一从未验证过的一条）。
+
+**探针先行的四个真实发现**（都不是假想风险）：
+
+1. **字典序陷阱（最重要）**：PG 的 `->>` 一律返回 text，不显式 cast 就按**字典序**比较。
+   实测 `price >= 10` 会把 2/3/9 也命中（`'2' > '1'`）。
+   SQLite 的 `json_extract` 保留类型，故 SQLite 侧完全无此问题——
+   **若不做跨方言验证，会写出"测试全绿但范围筛选静默返回错误结果"的驱动**。
+2. **参数序列化陷阱**：postgres.js 对字符串参数会按 jsonb **再序列化一次**
+   （`'["hot"]'` 变成 jsonb 字符串值而非数组），导致 `@>` 恒为 false。
+   必须用 `sql.json()` 标记 JSON 参数。
+3. **FTS5 是 SQLite 专有**：`CREATE VIRTUAL TABLE ... USING fts5` 在 PG 上直接语法错误
+   → **方言隔离不能只在存储层做**：任何用了方言特性的模块都需要自己的策略表。
+4. **事务重入的实现差异**：PG 是连接池模型（每个事务独占连接），无法像 SQLite 那样用
+   全局深度计数 → 改用 `AsyncLocalStorage` 跟踪调用链上的当前事务，嵌套走 SAVEPOINT。
+
+**架构动作**：
+- **抽出方言无关共享层** `modules/storage/schema/tables.ts`：表结构声明、结构注册表、
+  行映射（列名映射与 JSON 列判定所有方言一致）；**值编解码由驱动注入 `ValueCodec`**
+  （JSON 序列化、布尔表示、大整数在各驱动吸收）。两驱动共享同一份表结构真相，不会漂移。
+- **契约测试参数化**：`storage.test.ts` / `storage-filters.test.ts` 改为
+  `describe.each(DIALECTS)` —— **同一套契约测试跑在所有已实现方言上**。
+- **search 模块改为策略表**：`SEARCH_STRATEGIES`（按方言名**查表**，而非 `if (dialect === ...)`）。
+  既与 `storage/factory.ts` 同构，又天然不触发 `check-no-dialect` 扫描（方言判断收敛在策略表内）。
+  未实现的方言**优雅降级**（不注册能力、服务照常启动、`/api/v1/search` 返回 404 + 明确警告），
+  而不是让 bootstrap 崩掉。
+- **CI 加 `postgres` job**：每次 PR 起真实 PG 跑跨方言契约测试。
+- **Makefile `test-pg`**：把"怎么跑 PG 测试"固化（含"必须串行"这一约束——
+  多文件并行会争抢同一个库的建表/清表，实测表现为 `duplicate key ... pg_type_typname_nsp_index`）。
+
+**验证**：
+- PG 上 **41 个测试全绿**：存储契约 13 + JSON 过滤 5 + 应用级端到端 5（各 × 两方言）
+- 应用级端到端覆盖：全模块在 PG 上装配、内容 CRUD（PT 结构/布尔/epoch 毫秒往返）、
+  **JSON 数字范围过滤不按字典序**（字典序陷阱的回归用例）、软删除 + slug 复用（`E_CONFLICT` 收敛）、
+  嵌套事务回滚不影响外层
+- SQLite 侧 **171 通过 / 5 跳过**（PG 用例在未设 `TEST_PG_URL` 时跳过）；lint / tsc / 三扫描全绿
+
+**遗留**：
+- [ ] PG 的**全文检索策略**（tsvector/tsquery）——search 目前在 PG 上降级为不可用
+- [ ] mysql 驱动（方言已声明，实现待补）
+
+---

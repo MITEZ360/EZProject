@@ -1,21 +1,44 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { StorageDriver } from '@kernel/contracts/storage.contract.js';
-import { createStorageDriver, type StorageConfig } from '@modules/storage/factory.js';
+import type { Dialect, StorageDriver } from '@kernel/contracts/storage.contract.js';
+import {
+  createStorageDriver,
+  isDialectAvailable,
+  type StorageConfig,
+} from '@modules/storage/factory.js';
+
+// 契约测试跑在**所有已实现方言**上——这是"换配置可切库"这条承诺的真正兑现。
+// PG 需要真实服务：设 TEST_PG_URL 才纳入（本地/CI 验证时启用），否则只跑 SQLite。
+const DIALECTS: Array<{ name: Dialect; url: string }> = [{ name: 'sqlite', url: ':memory:' }];
+if (process.env['TEST_PG_URL']) {
+  DIALECTS.push({ name: 'postgres', url: process.env['TEST_PG_URL'] });
+}
 
 let driver: StorageDriver;
 
-beforeEach(async () => {
-  driver = createStorageDriver({ dialect: 'sqlite', url: ':memory:' });
-  await driver.migrate();
-});
+/** 建驱动并迁移。PG 是持久库 → 先清表保证用例间隔离（SQLite 用内存库天然干净）。 */
+async function makeDriver(dialect: Dialect, url: string): Promise<StorageDriver> {
+  const d = createStorageDriver({ dialect, url });
+  if (dialect !== 'sqlite') {
+    await d.transaction((tx) => tx.exec('DROP TABLE IF EXISTS entries, content_types CASCADE'));
+  }
+  await d.migrate();
+  return d;
+}
 
-afterEach(async () => {
-  await driver.close();
-});
+/** 把驱动生命周期挂到当前 describe 上（每个方言各自建/关） */
+function useDialect(dialect: Dialect, url: string): void {
+  beforeEach(async () => {
+    driver = await makeDriver(dialect, url);
+  });
+  afterEach(async () => {
+    await driver.close();
+  });
+}
 
-describe('sqlite 驱动（实现 StorageDriver 契约）', () => {
+describe.each(DIALECTS)('$name 驱动（实现 StorageDriver 契约）', (d) => {
+  useDialect(d.name, d.url);
   it('dialect 正确', () => {
-    expect(driver.dialect).toBe('sqlite');
+    expect(driver.dialect).toBe(d.name);
   });
 
   it('insert / findOne / find 往返（JSON 字段自动序列化）', async () => {
@@ -111,7 +134,8 @@ describe('sqlite 驱动（实现 StorageDriver 契约）', () => {
   });
 });
 
-describe('sqlite 事务语义（契约 v1.1：可重入）', () => {
+describe.each(DIALECTS)('$name 事务语义（契约 v1.1：可重入）', (d) => {
+  useDialect(d.name, d.url);
   it('嵌套 transaction() 不报错，内层操作随外层一起提交', async () => {
     await driver.transaction(async (tx) => {
       await tx.insert('entries', {
@@ -173,7 +197,8 @@ describe('sqlite 事务语义（契约 v1.1：可重入）', () => {
   });
 });
 
-describe('sqlite 错误收敛与 count', () => {
+describe.each(DIALECTS)('$name 错误收敛与 count', (d) => {
+  useDialect(d.name, d.url);
   it('约束冲突收敛为 StorageError(E_CONFLICT)，不泄漏 SqliteError', async () => {
     const insert = () =>
       driver.transaction((tx) =>
@@ -215,8 +240,22 @@ describe('sqlite 错误收敛与 count', () => {
 });
 
 describe('策略工厂', () => {
-  it('未实现的方言给出明确错误（而非静默失败）', () => {
-    const pg: StorageConfig = { dialect: 'postgres' };
-    expect(() => createStorageDriver(pg)).toThrow(/未实现/);
+  it('方言可用性：postgres 已实现；未实现的方言明确报错（不静默失败）', () => {
+    expect(isDialectAvailable('sqlite')).toBe(true);
+    expect(isDialectAvailable('postgres')).toBe(true);
+    expect(isDialectAvailable('mysql')).toBe(false);
+
+    const mysql: StorageConfig = { dialect: 'mysql' };
+    expect(() => createStorageDriver(mysql)).toThrow(/未实现/);
+  });
+
+  it('postgres 缺连接串时明确报错（不静默连错库）', () => {
+    const saved = process.env['DATABASE_URL'];
+    delete process.env['DATABASE_URL'];
+    try {
+      expect(() => createStorageDriver({ dialect: 'postgres' })).toThrow(/连接串/);
+    } finally {
+      if (saved !== undefined) process.env['DATABASE_URL'] = saved;
+    }
   });
 });

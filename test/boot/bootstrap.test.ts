@@ -57,8 +57,9 @@ describe('策略模式：切方言能生效', () => {
   });
 
   it('未实现的方言给出明确错误', async () => {
+    // postgres 已实现（见 test/boot/postgres-e2e.test.ts）；mysql 仍未实现
     await expect(
-      bootstrap({ modules: [storageModule({ dialect: 'postgres' })] })
+      bootstrap({ modules: [storageModule({ dialect: 'mysql' })] })
     ).rejects.toThrow(/未实现/);
   });
 });

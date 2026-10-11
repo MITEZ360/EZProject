@@ -10,22 +10,20 @@ import type {
   StorageTx,
   TableSchema,
 } from '@kernel/contracts/storage.contract.js';
+import {
+  StorageError,
+  createSchemaRegistry,
+  ident,
+  toLogicalRow,
+  toPhysicalRow,
+  type ValueCodec,
+} from '../schema/tables.js';
+
+export { StorageError };
 
 interface SqliteConfig {
   /** 文件路径，或 ':memory:' */
   file: string;
-}
-
-/** 存储层统一错误：方言细节（如 SqliteError）不得泄漏给上层。 */
-export class StorageError extends Error {
-  constructor(
-    public readonly code: 'E_CONFLICT' | 'E_STORAGE',
-    message: string,
-    public readonly details?: Record<string, unknown>
-  ) {
-    super(message);
-    this.name = code;
-  }
 }
 
 /** 建表 DDL：内容相关表的"方言无关逻辑结构"落地为 SQLite 物理表。
@@ -57,61 +55,22 @@ CREATE TABLE IF NOT EXISTS content_types (
 );
 `;
 
-/** 表结构声明：列名映射 + 每列的解析类型。
- *  JSON 列必须显式声明——禁止任何"看起来像 JSON 就解析"的启发式（会静默损坏正文文本）。 */
-const TABLE_SCHEMAS: Record<string, { columns: Record<string, string>; jsonColumns: string[] }> = {
-  entries: {
-    columns: { tenantId: 'tenant_id', createdAt: 'created_at', updatedAt: 'updated_at', deletedAt: 'deleted_at' },
-    jsonColumns: ['data'],
+/**
+ * SQLite 的值编解码：
+ *  - JSON 列一律 JSON.stringify（字符串值也加引号，保证读回 parse 恒成功）
+ *  - 布尔按契约 6.5 落 INTEGER（SQLite 无原生 bool）
+ */
+const sqliteCodec: ValueCodec = {
+  encode: (v, isJson) => {
+    if (isJson) return JSON.stringify(v);
+    return typeof v === 'boolean' ? (v ? 1 : 0) : v;
   },
-  content_types: {
-    columns: { tenantId: 'tenant_id', createdAt: 'created_at', updatedAt: 'updated_at' },
-    jsonColumns: ['schema'],
+  decode: (v, isJson) => {
+    // 声明过的 JSON 列解析失败 = 数据损坏，必须炸出来而非静默
+    if (isJson && typeof v === 'string') return JSON.parse(v);
+    return v;
   },
 };
-
-/** 表结构注册表：内置表 + 模块经 registerTable 登记的私有表 */
-const declaredSchemas = new Map<string, { columns: Record<string, string>; jsonColumns: string[] }>(
-  Object.entries(TABLE_SCHEMAS).map(([k, v]) => [k, v])
-);
-
-function schemaOf(table: string) {
-  const s = declaredSchemas.get(table);
-  if (!s) throw new StorageError('E_STORAGE', `[storage] 未声明的表结构: ${table}`);
-  return s;
-}
-
-/** 把 camelCase 行对象转为 DB 行（列名下划线化；JSON 列序列化） */
-function toRow(table: string, data: Record<string, unknown>): Record<string, unknown> {
-  const { columns, jsonColumns } = schemaOf(table);
-  const jsonSet = new Set(jsonColumns);
-  const row: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(data)) {
-    if (v === undefined) continue;
-    const phys = columns[k] ?? k;
-    // JSON 列一律 stringify（字符串值也加引号，保证读回 JSON.parse 恒成功）；
-    // 布尔按契约 6.5 落 INTEGER（SQLite 无原生 bool）
-    row[phys] = jsonSet.has(k) ? JSON.stringify(v) : typeof v === 'boolean' ? (v ? 1 : 0) : v;
-  }
-  return row;
-}
-
-/** 把 DB 行还原为应用对象（下划线 → camelCase；仅声明过的 JSON 列做解析） */
-function fromRow(table: string, row: Record<string, unknown>): Record<string, unknown> {
-  const { columns, jsonColumns } = schemaOf(table);
-  const reverse: Record<string, string> = {};
-  for (const [camel, phys] of Object.entries(columns)) reverse[phys] = camel;
-  const jsonPhys = new Set(jsonColumns.map((c) => columns[c] ?? c));
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(row)) {
-    if (jsonPhys.has(k) && typeof v === 'string') {
-      out[reverse[k] ?? k] = JSON.parse(v); // 声明过的 JSON 列解析失败=数据损坏，必须炸出来而非静默
-      continue;
-    }
-    out[reverse[k] ?? k] = v;
-  }
-  return out;
-}
 
 /** 把 SqliteError 收敛为 StorageError（防方言错误码泄漏） */
 function wrapError(table: string, e: unknown): unknown {
@@ -125,6 +84,7 @@ function wrapError(table: string, e: unknown): unknown {
 }
 
 export function createSqliteDriver(config: SqliteConfig): StorageDriver {
+  const registry = createSchemaRegistry();
   const db = new Database(config.file);
   const isMemory = config.file === ':memory:';
   if (!isMemory) db.pragma('journal_mode = WAL'); // WAL 对内存库无效，跳过（避免误导性配置）
@@ -140,27 +100,27 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
 
   const makeTx = (): StorageTx => ({
     async find<T>(spec: QuerySpec): Promise<T[]> {
-      const { sql, params } = buildSelect(spec);
+      const { sql, params } = buildSelect(spec, registry);
       try {
         const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
-        return rows.map((r) => fromRow(spec.table, r) as T);
+        return rows.map((r) => toLogicalRow(registry, spec.table, r, sqliteCodec) as T);
       } catch (e) {
         throw wrapError(spec.table, e);
       }
     },
 
     async findOne<T>(spec: QuerySpec): Promise<T | null> {
-      const { sql, params } = buildSelect({ ...spec, limit: 1 });
+      const { sql, params } = buildSelect({ ...spec, limit: 1 }, registry);
       try {
         const row = db.prepare(sql).get(...params) as Record<string, unknown> | undefined;
-        return row ? (fromRow(spec.table, row) as T) : null;
+        return row ? (toLogicalRow(registry, spec.table, row, sqliteCodec) as T) : null;
       } catch (e) {
         throw wrapError(spec.table, e);
       }
     },
 
     async count(spec: QuerySpec): Promise<number> {
-      const { where, params } = buildConditions(spec);
+      const { where, params } = buildConditions(spec, registry);
       try {
         const row = db
           .prepare(`SELECT COUNT(*) AS n FROM ${ident(spec.table)}${where}`)
@@ -182,7 +142,7 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
     },
 
     async insert<T>(table: string, data: T): Promise<T> {
-      const row = toRow(table, data as Record<string, unknown>);
+      const row = toPhysicalRow(registry, table, data as Record<string, unknown>, sqliteCodec);
       const cols = Object.keys(row);
       const placeholders = cols.map(() => '?').join(', ');
       const sql = `INSERT INTO ${ident(table)} (${cols.map(ident).join(', ')}) VALUES (${placeholders})`;
@@ -195,7 +155,7 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
     },
 
     async update<T>(table: string, id: string, patch: Partial<T>): Promise<T> {
-      const row = toRow(table, patch as Record<string, unknown>);
+      const row = toPhysicalRow(registry, table, patch as Record<string, unknown>, sqliteCodec);
       const cols = Object.keys(row);
       try {
         if (cols.length > 0) {
@@ -211,7 +171,7 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
         if (!cur) {
           throw new StorageError('E_CONFLICT', `[storage] 更新目标不存在: ${table}/${id}`);
         }
-        return fromRow(table, cur) as T;
+        return toLogicalRow(registry, table, cur, sqliteCodec) as T;
       } catch (e) {
         if (e instanceof StorageError) throw e;
         throw wrapError(table, e);
@@ -233,13 +193,7 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
       db.exec(DDL);
     },
     registerTable(name: string, schema: TableSchema): void {
-      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
-        throw new StorageError('E_STORAGE', `[storage] 非法表名: ${name}`);
-      }
-      declaredSchemas.set(name, {
-        columns: schema.columns ?? {},
-        jsonColumns: schema.jsonColumns ?? [],
-      });
+      registry.registerTable(name, schema);
     },
     async transaction<T>(fn: (tx: StorageTx) => Promise<T>): Promise<T> {
       const runTx = async (): Promise<T> => {
@@ -288,17 +242,12 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
   };
 }
 
-/** SQL 标识符白名单（防注入：仅允许字母数字下划线） */
-function ident(name: string): string {
-  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
-    throw new StorageError('E_STORAGE', `[storage] 非法标识符: ${name}`);
-  }
-  return `"${name}"`;
-}
-
 /** 编译 where + filters（AND 组合）。顶层列走物理列；点路径走 json_extract。 */
-function buildConditions(spec: QuerySpec): { where: string; params: unknown[] } {
-  const { columns } = schemaOf(spec.table);
+function buildConditions(
+  spec: QuerySpec,
+  registry: ReturnType<typeof createSchemaRegistry>
+): { where: string; params: unknown[] } {
+  const { columns } = registry.schemaOf(spec.table);
   const conds: string[] = [];
   const params: unknown[] = [];
 
@@ -359,12 +308,15 @@ function buildConditions(spec: QuerySpec): { where: string; params: unknown[] } 
   return { where: conds.length ? ` WHERE ${conds.join(' AND ')}` : '', params };
 }
 
-/** 把方言无关 QuerySpec 编成 SQL（仅 sqlite 驱动内部使用） */
-function buildSelect(spec: QuerySpec): { sql: string; params: unknown[] } {
-  const { where, params } = buildConditions(spec);
+/** 把方言无关 QuerySpec 编成 SQL（驱动内部使用） */
+function buildSelect(
+  spec: QuerySpec,
+  registry: ReturnType<typeof createSchemaRegistry>
+): { sql: string; params: unknown[] } {
+  const { where, params } = buildConditions(spec, registry);
   let sql = `SELECT * FROM ${ident(spec.table)}${where}`;
   if (spec.orderBy?.length) {
-    const { columns } = schemaOf(spec.table);
+    const { columns } = registry.schemaOf(spec.table);
     const parts = spec.orderBy.map(
       (o) => `${ident(columns[o.field] ?? o.field)} ${o.dir === 'desc' ? 'DESC' : 'ASC'}`
     );

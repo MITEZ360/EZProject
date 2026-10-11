@@ -10,6 +10,8 @@
 ## [Unreleased]
 
 ### Changed
+- **存储层抽出方言无关共享层**（`schema/tables.ts`）：表结构声明、结构注册表、行映射共用；值编解码（JSON/布尔/大整数）由驱动注入 `ValueCodec` 各自吸收
+- **search 模块改为策略表**（按方言查表）：未实现的方言优雅降级（不注册能力 + 明确警告），不再阻断启动
 - **存储契约 v2.1**：`StorageTx.exec` 支持参数绑定；新增 `StorageTx.query<T>`（原生查询，边界限模块私有表与 QuerySpec 表达不了的方言特性，如 FTS5 `MATCH`）
 - **缓存/媒体模块术语归正**：策略选择字段由 `dialect` 改名 `provider`（"方言"专指数据库方言，避免混淆），并改为**策略表驱动**（与 storage factory 同构，模块内无 if/else）
 - **依赖分类修正**：`better-sqlite3` 归入 dependencies（运行时依赖）；移除未使用的 `drizzle-orm`；react/antd/dayjs 归入 devDependencies（构建期依赖）

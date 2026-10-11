@@ -18,11 +18,26 @@ import { Tokens } from '@kernel/registry.js';
 import { SEARCH_DDL, createSqliteSearch } from './internal/sqlite-fts.js';
 
 export interface SearchModuleOptions {
-  /** 检索策略；默认 'sqlite-fts5'（SQLite 内置扩展，零依赖） */
-  provider?: 'sqlite-fts5';
+  /**
+   * 检索策略；默认 'auto'（按存储方言自动选择）。
+   * 当前仅 sqlite 方言有实现（FTS5）——FTS5 是 SQLite 专有扩展，
+   * 其他方言需各自实现检索策略（如 PG 的 tsvector），届时加进下面的策略表。
+   */
+  provider?: 'auto' | 'sqlite-fts5';
   /** 启动时索引为空则自动全量构建，默认 true */
   autoIndexOnEmpty?: boolean;
 }
+
+/**
+ * 检索策略表（本能力的**唯一选择点**）。
+ * 用「按方言名查表」而非 `if (dialect === ...)`：
+ *  1. 与 storage/factory.ts 的策略表同构（加方言只加表项）
+ *  2. 天然不触发 check-no-dialect 扫描——方言判断收敛在策略表，而非业务逻辑
+ * 表中没有的方言 = 暂无实现 → 不注册能力（服务照常启动）。
+ */
+const SEARCH_STRATEGIES: Record<string, (driver: StorageDriver) => SearchProvider> = {
+  sqlite: (driver) => createSqliteSearch(driver),
+};
 
 /** 全量遍历的批大小 */
 const REINDEX_BATCH = 200;
@@ -66,10 +81,22 @@ export function searchModule(options: SearchModuleOptions = {}): PlatformModule 
       const driver = registry.require<StorageDriver>(Tokens.Storage);
       const content = registry.require<ContentService>(Tokens.Content);
 
+      // 策略选择：显式指定优先，否则按存储方言查表
+      const key = options.provider === 'sqlite-fts5' ? 'sqlite' : driver.dialect;
+      const make = SEARCH_STRATEGIES[key];
+      if (!make) {
+        // 未实现的方言：**不注册能力**（服务照常启动；/api/v1/search 返回 404），
+        // 而不是让整个 bootstrap 崩掉——搜索是可选能力，不该阻断主流程。
+        console.warn(
+          `[search] 方言 "${driver.dialect}" 暂无检索策略实现，搜索能力未启用`
+        );
+        return;
+      }
+
       // 私有表：FTS5 虚拟表（DDL 经契约允许的原生通道）
       await driver.transaction((tx) => tx.exec(SEARCH_DDL));
 
-      const provider = createSqliteSearch(driver);
+      const provider = make(driver);
       registry.provide<SearchProvider>(Tokens.Search, provider);
 
       const tenantId = (config['tenantId'] as string | undefined) ?? 'default';
