@@ -11,11 +11,48 @@ export class ApiError extends Error {
   }
 }
 
-const tokenKey = 'admin.token';
-export const getToken = (): string => localStorage.getItem(tokenKey) ?? '';
-export const setToken = (t: string): void => localStorage.setItem(tokenKey, t);
+const ACCESS_KEY = 'admin.access';
+const REFRESH_KEY = 'admin.refresh';
+export const getToken = (): string => localStorage.getItem(ACCESS_KEY) ?? '';
+export const setToken = (t: string): void => {
+  // 兼容：单令牌模式（引导令牌 / 开发）直接作为 access 令牌
+  localStorage.setItem(ACCESS_KEY, t);
+  localStorage.removeItem(REFRESH_KEY);
+};
+export const clearTokens = (): void => {
+  localStorage.removeItem(ACCESS_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+};
+export const hasSession = (): boolean =>
+  Boolean(localStorage.getItem(ACCESS_KEY) || localStorage.getItem(REFRESH_KEY));
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** 刷新令牌（并发请求只触发一次刷新） */
+let refreshing: Promise<boolean> | null = null;
+async function refreshSession(): Promise<boolean> {
+  const refreshToken = localStorage.getItem(REFRESH_KEY);
+  if (!refreshToken) return false;
+  refreshing ??= (async () => {
+    try {
+      const res = await fetch('/api/manage/v1/auth/refresh', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) return false;
+      const pair = (await res.json()) as { accessToken: string; refreshToken: string };
+      localStorage.setItem(ACCESS_KEY, pair.accessToken);
+      localStorage.setItem(REFRESH_KEY, pair.refreshToken);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setTimeout(() => (refreshing = null), 0);
+    }
+  })();
+  return refreshing;
+}
+
+async function request<T>(method: string, path: string, body?: unknown, retry = true): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: {
@@ -24,6 +61,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401 && retry && (await refreshSession())) {
+    return request<T>(method, path, body, false); // 刷新成功，重放一次
+  }
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
     const err = (json['error'] ?? {}) as { code?: string; message?: string };
@@ -31,6 +71,28 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   return json as T;
 }
+
+export const authApi = {
+  /** 邮箱密码登录：拿到 access + refresh */
+  login: async (email: string, password: string) => {
+    const pair = await request<{ accessToken: string; refreshToken: string; expiresIn: number }>(
+      'POST',
+      '/api/manage/v1/auth/login',
+      { email, password }
+    );
+    localStorage.setItem(ACCESS_KEY, pair.accessToken);
+    localStorage.setItem(REFRESH_KEY, pair.refreshToken);
+    return pair;
+  },
+  logout: async () => {
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    if (refreshToken) {
+      await request('POST', '/api/manage/v1/auth/logout', { refreshToken }).catch(() => undefined);
+    }
+    clearTokens();
+  },
+  me: () => request<{ principal: Record<string, unknown> }>('GET', '/api/manage/v1/auth/me'),
+};
 
 export interface EntryItem {
   id: string;

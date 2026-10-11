@@ -7,6 +7,7 @@ import type { EntityTypeDef } from '@kernel/primitives/entity.js';
 import { storageModule } from '@modules/storage/index.js';
 import { contentModule } from '@modules/content/index.js';
 import { httpModule, type HttpModuleOptions } from '@modules/http/index.js';
+import { authzModule, type AuthzModuleOptions } from '@modules/authz/index.js';
 
 /** 博客的内容类型定义（数据驱动，非内核代码） */
 export const blogTypes: EntityTypeDef[] = [
@@ -31,6 +32,8 @@ export interface BlogOptions {
   logger?: Logger;
   /** 默认租户（博客场景单租户起步） */
   tenantId?: string;
+  /** 身份与权限模块配置（JWT 密钥等）；不传则用默认（开发随机密钥） */
+  authz?: AuthzModuleOptions;
   /** HTTP 模块配置（不传则不挂 HTTP 层） */
   http?: HttpModuleOptions;
 }
@@ -40,6 +43,7 @@ export async function createBlogApp(options: BlogOptions = {}): Promise<App> {
   return bootstrap({
     modules: [
       storageModule({ dialect: options.dialect, url: options.url }),
+      authzModule(options.authz),
       contentModule(blogTypes),
       ...(options.http ? [httpModule({ ...options.http, tenantId: options.tenantId })] : []),
     ],

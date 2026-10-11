@@ -8,11 +8,31 @@ import { join } from 'node:path';
 import type { EntityTypeDef } from '@kernel/primitives/entity.js';
 import type { ContentService } from '@kernel/contracts/content.contract.js';
 import { createBlogApp } from '@scenarios/blog/index.js';
-import { allowAllGuard, HttpTokens, type HttpApp } from '@modules/http/index.js';
+import { HttpTokens, type HttpApp } from '@modules/http/index.js';
+import type { IdentityService } from '@kernel/contracts/identity.contract.js';
 import { Tokens } from '@kernel/registry.js';
 import { systemPrincipal } from '@kernel/primitives/principal.js';
 
 const actor = systemPrincipal('tenant01');
+
+/** 带 admin 角色的测试守卫（authz 模块在场时的合法主体） */
+const adminGuard = async (_req: Request, tenantId: string) => ({
+  id: 'test-admin',
+  tenantId,
+  kind: 'user',
+  capabilities: ['admin'],
+});
+
+/** 播种内置 admin 角色（全权），使测试主体可写 */
+async function seedAdmin(app: { registry: { require: <T>(t: string) => T } }): Promise<void> {
+  await app.registry.require<IdentityService>(Tokens.Identity).upsertRole({
+    tenantId: 'tenant01',
+    slug: 'admin',
+    name: '管理员',
+    permissions: [{ resource: '*', actions: ['*'] }],
+    builtin: true,
+  });
+}
 
 
 const pageType: EntityTypeDef = {
@@ -120,8 +140,9 @@ describe('类型管理 API（Management）', () => {
       dialect: 'sqlite',
       url: ':memory:',
       tenantId: 'tenant01',
-      http: { guard: allowAllGuard(), tenantId: 'tenant01' },
+      http: { guard: adminGuard, tenantId: 'tenant01' },
     });
+    await seedAdmin(app);
     const api = app.registry.require<HttpApp>(HttpTokens.App);
     const headers = { 'content-type': 'application/json' };
 
@@ -150,8 +171,9 @@ describe('类型管理 API（Management）', () => {
       dialect: 'sqlite',
       url: ':memory:',
       tenantId: 'tenant01',
-      http: { guard: allowAllGuard(), tenantId: 'tenant01' },
+      http: { guard: adminGuard, tenantId: 'tenant01' },
     });
+    await seedAdmin(app);
     const api = app.registry.require<HttpApp>(HttpTokens.App);
     const res = await api.request('/api/manage/v1/types', {
       method: 'POST',

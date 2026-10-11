@@ -4,11 +4,14 @@
 // 通用管理端点（audit/settings）**惰性解析**：路由恒挂载，请求时从注册表解析能力——
 // 模块加载顺序无关；模块未加载时返回 404 JSON。
 
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import type { ContentService } from '@kernel/contracts/content.contract.js';
 import type { AuditService } from '@kernel/contracts/audit.contract.js';
 import type { SettingsService } from '@kernel/contracts/settings.contract.js';
+import type { IdentityService } from '@kernel/contracts/identity.contract.js';
+import type { AuthzService } from '@kernel/contracts/authz.contract.js';
+import { mountAuthRoutes } from './auth-routes.js';
 import type { Principal } from '@kernel/primitives/principal.js';
 import type { Registry } from '@kernel/registry.js';
 import { statusOf, errorBody } from './errors.js';
@@ -35,8 +38,10 @@ export interface HttpDeps {
   guard: RequestGuard;
   /** 默认租户（场景注入；单租户场景的便捷） */
   tenantId: string;
-  /** 注册表（惰性解析可选能力：audit/settings） */
+  /** 注册表（惰性解析可选能力：audit/settings/identity/authz） */
   registry: Registry;
+  /** 引导令牌（MANAGE_TOKEN）：仅在 authz 模块未挂载时作为唯一凭证 */
+  manageToken?: string;
   /** 管理后台静态资源目录（相对 cwd，如 'dist/admin'）；不传则不托管 */
   staticDir?: string;
 }
@@ -96,19 +101,50 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
   // ---------- Management API（对内 · 写 · 守卫） ----------
   const manage = new Hono<Vars>();
 
-  // 守卫中间件：解析主体；失败 401
+  // 公开路径（无需凭证）：登录 / 刷新 / 登出
+  const PUBLIC_PATHS = new Set([
+    '/api/manage/v1/auth/login',
+    '/api/manage/v1/auth/refresh',
+    '/api/manage/v1/auth/logout',
+  ]);
+
+  // 守卫中间件：JWT（authz 模块在场时）→ 引导令牌兜底 → 场景自定义守卫
   manage.use('*', async (c, next) => {
+    if (PUBLIC_PATHS.has(c.req.path)) return next(); // 公开端点
     const tenantId = c.req.header('x-tenant-id') ?? deps.tenantId;
-    const principal = await deps.guard(c.req.raw, tenantId);
+    let principal: Principal | null = null;
+
+    const header = c.req.header('authorization') ?? '';
+    const m = /^Bearer\s+(.+)$/i.exec(header);
+    const token = m?.[1];
+    if (token) {
+      const identity = deps.registry.get<IdentityService>('identity');
+      if (identity) {
+        principal = await identity.verifyAccessToken(token);
+        if (!principal) {
+          // authz 在场时，引导令牌仍可作为 bootstrap 主体（用于 /auth/bootstrap）
+          principal =
+            deps.manageToken && token === deps.manageToken
+              ? { id: 'bootstrap', tenantId, kind: 'bootstrap' }
+              : null;
+        }
+      } else if (deps.manageToken && token === deps.manageToken) {
+        principal = { id: 'bootstrap', tenantId, kind: 'bootstrap' };
+      }
+    }
+    if (!principal) {
+      principal = await deps.guard(c.req.raw, tenantId); // 场景自定义守卫（允许全开等）
+    }
     if (!principal) {
       return c.json({ error: { code: 'E_UNAUTHORIZED', message: '鉴权失败' } }, 401);
     }
     c.set('principal', principal);
-    c.set('tenantId', tenantId);
+    c.set('tenantId', principal.tenantId || tenantId);
     await next();
   });
 
-  // 注意：所有固定路径路由（types/audit-logs/settings）必须注册在 /:type 通配之前
+  // 注意：所有固定路径路由（auth/users/roles/types/audit-logs/settings）必须注册在 /:type 通配之前
+  mountAuthRoutes(manage, { registry: deps.registry, defaultTenantId: deps.tenantId });
 
   // GET /api/manage/v1/audit-logs（audit 模块贡献；未加载 → 404 JSON）
   manage.get('/audit-logs', async (c) => {
@@ -163,6 +199,8 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     if (!body || typeof body !== 'object') {
       return c.json({ error: { code: 'E_VALIDATION', message: '请求体必须是 JSON 对象' } }, 400);
     }
+    const auth = await authorize(c, 'types', 'create');
+    if ('denied' in auth) return auth.denied;
     try {
       await deps.content.defineType(body as Parameters<typeof deps.content.defineType>[0], {
         ...principal,
@@ -184,12 +222,14 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
       return c.json({ error: { code: 'E_VALIDATION', message: '请求体必须是 JSON 对象' } }, 400);
     }
     const { locale, ...data } = body as Record<string, unknown>;
+    const auth = await authorize(c, type, 'create', data);
+    if ('denied' in auth) return auth.denied;
     try {
       const entity = await deps.content.create({
         type,
         tenantId,
         locale: typeof locale === 'string' ? locale : undefined,
-        data,
+        data: auth.clean ?? data,
         actor: principal,
       });
       return c.json(entity, 201);
@@ -210,8 +250,10 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     // locale 属实体列而非 data 字段：从请求体剥离，其余全部并入 data
     const data = { ...(body as Record<string, unknown>) };
     delete data['locale'];
+    const auth = await authorize(c, c.req.param('type'), 'update', data);
+    if ('denied' in auth) return auth.denied;
     try {
-      const entity = await deps.content.update(id, { tenantId, data, actor: principal });
+      const entity = await deps.content.update(id, { tenantId, data: auth.clean ?? data, actor: principal });
       return c.json(entity);
     } catch (e) {
       return c.json(errorBody(e), statusOf(e));
@@ -221,6 +263,8 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
   // DELETE /api/manage/v1/:type/:id —— 软删除
   manage.delete('/:type/:id', async (c) => {
     const principal = c.get('principal') as Principal;
+    const auth = await authorize(c, c.req.param('type'), 'delete');
+    if ('denied' in auth) return auth.denied;
     try {
       await deps.content.remove(c.req.param('id'), c.get('tenantId') as string, principal);
       return c.json({ ok: true });
@@ -228,6 +272,34 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
       return c.json(errorBody(e), statusOf(e));
     }
   });
+
+  /** 写操作鉴权（authz 模块在场时强制；不在场则放行——单机/开发形态）。
+   *  返回 null = 通过；返回 Response = 拒绝。同时按 scope 剥离 deniedFields。 */
+  const authorize = async (
+    c: Context<Vars>,
+    resource: string,
+    action: 'create' | 'update' | 'delete',
+    data?: Record<string, unknown>
+  ): Promise<{ denied: Response } | { clean: Record<string, unknown> | undefined }> => {
+    const authz = deps.registry.get<AuthzService>('authz');
+    if (!authz) return { clean: data };
+    const decision = await authz.can(c.get('principal'), { resource, action });
+    if (!decision.allowed) {
+      return {
+        denied: c.json(
+          { error: { code: decision.reason ?? 'E_FORBIDDEN', message: '权限不足' } },
+          403
+        ),
+      };
+    }
+    let clean = data;
+    const deniedFields = decision.deniedFields ?? [];
+    if (clean && deniedFields.length > 0) {
+      clean = { ...clean };
+      for (const f of deniedFields) delete clean[f]; // scope：字段级拒绝
+    }
+    return { clean };
+  };
 
   app.route('/api/v1', contentApi);
   app.route('/api/manage/v1', manage);

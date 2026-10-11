@@ -199,14 +199,14 @@ describe('Management API（写 · 守卫）', () => {
 describe('HTTP 模块可拔插（宪法一）', () => {
   it('不传 http 配置：storage+content 照常启动，无 http 模块', async () => {
     const bare = await createBlogApp({ dialect: 'sqlite', url: ':memory:' });
-    expect(bare.loadedModules()).toEqual(['storage', 'content']);
+    expect(bare.loadedModules()).toEqual(['storage', 'authz', 'content']);
     expect(bare.registry.has(HttpTokens.App)).toBe(false);
     await bare.stop();
   });
 
   it('模块依赖拓扑：http 排在 content 前也能正确装载', async () => {
     const app2 = await bootstrapModulesOrder();
-    expect(app2.loadedModules()).toEqual(['storage', 'content', 'http']);
+    expect(app2.loadedModules()).toEqual(['storage', 'content', 'http']); // 手工装配，未含 authz
     await app2.stop();
   });
 

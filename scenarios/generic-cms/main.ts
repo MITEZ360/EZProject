@@ -21,6 +21,7 @@ async function main(): Promise<void> {
       info: (msg, meta) => console.log(meta ? `${msg} ${JSON.stringify(meta)}` : msg),
       error: (msg, meta) => console.error(meta ? `${msg} ${JSON.stringify(meta)}` : msg),
     },
+    authz: { jwtSecret: process.env['JWT_SECRET'] },
     http: {
       manageToken: process.env['MANAGE_TOKEN'] ?? 'dev-only-token',
       staticDir: process.env['ADMIN_STATIC_DIR'] ?? 'dist/admin',
