@@ -59,3 +59,29 @@ export const api = {
 
   health: () => request<{ ok: boolean }>('GET', '/healthz'),
 };
+
+// ==================== 类型管理（决策 #26：类型定义是数据） ====================
+// 类型直接复用内核原语（单一事实来源），不复制定义
+
+import type { EntityTypeDef, FieldDef } from '@kernel/primitives/entity.js';
+export type { EntityTypeDef, FieldDef };
+
+export const FIELD_TYPE_LABELS: Record<FieldDef['type'], string> = {
+  text: '短文本',
+  longText: '长文本',
+  number: '数字',
+  boolean: '布尔',
+  date: '日期',
+  select: '枚举',
+  richText: '富文本',
+  component: '嵌套结构',
+  relation: '内容引用',
+  media: '媒体引用',
+  json: '任意 JSON',
+};
+
+export const apiTypes = {
+  listTypes: () => request<{ items: EntityTypeDef[] }>('GET', '/api/manage/v1/types'),
+  defineType: (def: EntityTypeDef) =>
+    request<{ ok: boolean }>('POST', '/api/manage/v1/types', def),
+};
