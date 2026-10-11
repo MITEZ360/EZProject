@@ -210,7 +210,7 @@ describe('HTTP 模块可拔插（宪法一）', () => {
   it('不传 http 配置：storage+content 照常启动，无 http 模块', async () => {
     const bare = await createBlogApp({ dialect: 'sqlite', url: ':memory:' });
     expect(bare.loadedModules()).toEqual(
-      ['storage', 'cache', 'authz', 'content', 'media', 'search', 'audit', 'settings']
+      ['storage', 'cache', 'authz', 'content', 'media', 'search', 'audit', 'settings', 'webhook']
     );
     expect(bare.registry.has(HttpTokens.App)).toBe(false);
     await bare.stop();
