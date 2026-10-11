@@ -33,9 +33,12 @@
 - **决策 #26 第二步落地**：`defineType` 落库（逻辑 Schema：类型定义是数据，更新不迁移旧数据）+ `listTypes`/`getType` 契约 + 类型管理 API（`POST/GET /api/manage/v1/types`）+ 跨重启持久化验证
 
 ### Added
+- **内容预览门**：Content API 的非 published 读取（草稿 / `status=all`）必须带凭证；预览响应 `private, no-store` 且绕过共享缓存
+- **限流**（`modules/http`）：内存固定窗口策略（**有界**：maxKeys + 过期清扫 + 最旧淘汰），按 IP 作用于 `/api/v1/*`（默认 120/窗口）与登录端点（默认 10/窗口，防爆破）；429 + `Retry-After`；可 `enabled: false` 关闭
 - **CI 流水线**（`.github/workflows/ci.yml`）：`verify` 档（双 tsconfig 类型检查 + eslint + 内核词汇/方言分支扫描 + 契约快照 + 单测）与 `full` 档（加启动/交付测试 + 构建产物），兑现 design 第 10 章的"机器把关"承诺；契约快照从 verify-full 挪进日常 lint
 
 ### Fixed
+- **Content API 草稿泄漏**（真实缺口，三处）：`?status=all`/`?status=draft` 匿名可读全部草稿；详情按 slug 可读草稿；**详情按 UUID 时完全不过滤 status** → 现统一由预览门拦截（匿名仅 published，非 published 详情返回 404 不泄漏存在性）
 - **方言扫描器漏检**：`check-no-dialect.mjs` 只匹配 `dialect ===`，漏掉 `!==`（`modules/media` 的 `dialect !== 'local'` 长期逃检）→ 已补齐
 - **内存缓存改有界 LRU**：原无上限 `Map` 可被外部撑爆（缓存 key 含完整 query string，`?offset=N` 等可产生无限 key）→ 条数上限（默认 1000）+ 近似字节上限（默认 8 MiB）+ LRU 淘汰；命中保鲜、覆盖写不重复计容、纯 LRU 覆盖过期回收（无热路径全表扫）
 - **驱动布尔落库**：按契约 6.5 转 INTEGER（原直接绑定布尔报错）

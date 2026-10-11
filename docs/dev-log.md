@@ -550,3 +550,44 @@ engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/ed
 - [ ] CI 未接自动发布（tag → release artifact）——需要时再加
 
 ---
+
+## 2026-10-11 · 阶段二收尾：内容预览门 + 限流（分支 `feature/preview-ratelimit`）
+
+**① 内容预览（同时修掉一个真实安全缺口）**
+
+复核发现 Content API 的草稿保护**完全没有**，且不止一处：
+1. 列表 `?status=all` / `?status=draft` → 匿名即可读全部草稿
+2. 详情按 slug `?status=draft` → 匿名可读草稿
+3. **详情按 UUID 时 `findOne` 完全不过滤 status** —— 拿到 id 就等于拿到草稿（最严重）
+
+**修法**：Content API 加"预览门"——公开只读**仅限 published**，其余一律要凭证
+（JWT 或引导令牌）。两条附带约束都不能省：
+- 预览响应 `private, no-store`（不进 CDN）
+- 预览读取**绕过共享缓存**（不读不写）——否则草稿会经缓存泄漏给匿名请求
+- 详情取到非 published 且无凭证 → **404**（不泄漏"此处有草稿"）
+
+**② 限流（design 阶段二明列，此前缺失）**
+
+- `modules/http/internal/rate-limit.ts`：**内存固定窗口**策略（纯模块层，内核无需新契约）
+- **有界**：桶由客户端 IP 决定 → 设 maxKeys + 过期清扫 + 最旧淘汰
+  （吸取缓存那个无界 Map 的教训，限流器自己不能成为攻击面）
+- 只作用于匿名可及的高危入口：`/api/v1/*`（默认 120/窗口）与登录端点（默认 10/窗口，防爆破）；
+  静态资源与 `/healthz` 不限；被拒返回 429 + `Retry-After`
+- 维度键：`X-Forwarded-For` 首段（代理后）→ `X-Real-IP` → `'local'`（直连时退化为全局额度）
+- 可通过 `http.rateLimit: { enabled: false }` 关闭（入口支持 `RATE_LIMIT_DISABLED=1`）
+
+**验证**：
+- 单测/启动测试：**148**（新增 `http-hardening` 9 个：预览门 5 + 限流 4）；lint / tsc / 三扫描全绿
+- 端到端冒烟（`dist/blog.mjs`）：
+  - 匿名 `status=all`/`status=draft` → 403；按 slug / **按 UUID** 取草稿 → 404；默认列表只出 published
+  - 带凭证 `status=all` → 200 且 `private, no-store`；已发布详情 → `public, max-age=60`
+  - 限流：130 次请求 → **120×200 + 10×429**（精确命中）；另一 IP 不受影响；`RATE_LIMIT_DISABLED=1` → 全 200
+  - 前台 / 后台 / 健康检查 均 200（无回归）
+
+**文档**：design 阶段一、二清单更新为实际状态。
+
+**遗留**：
+- [ ] 字段裁剪（`?fields=`）——阶段一提过，仍未做
+- [ ] 预览链接的短时 token（当前用登录凭证预览；分享式预览链接可后补）
+
+---

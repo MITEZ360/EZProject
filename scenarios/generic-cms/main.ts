@@ -25,6 +25,8 @@ async function main(): Promise<void> {
     http: {
       manageToken: process.env['MANAGE_TOKEN'] ?? 'dev-only-token',
       staticDir: process.env['ADMIN_STATIC_DIR'] ?? 'dist/admin',
+      // RATE_LIMIT_DISABLED=1 关闭限流（本地压测/内网无代理部署时用）
+      ...(process.env['RATE_LIMIT_DISABLED'] === '1' ? { rateLimit: { enabled: false } } : {}),
     },
   });
 

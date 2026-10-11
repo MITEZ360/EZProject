@@ -109,7 +109,7 @@ describe('Content API（只读 · 匿名 · 可缓存）', () => {
     expect(((await hot.json()) as { total: number }).total).toBe(2);
 
     // in（顶层列）
-    const inq = await api.request('/api/v1/products?filter[slug][in]=p1,p3&status=all');
+    const inq = await api.request('/api/v1/products?filter[slug][in]=p1,p3');
     expect(((await inq.json()) as { total: number }).total).toBe(2);
 
     // 非法操作符 → 400
@@ -117,11 +117,21 @@ describe('Content API（只读 · 匿名 · 可缓存）', () => {
     expect(bad.status).toBe(400);
   });
 
-  it('status=all 可取全部（含草稿，供预览类消费方）', async () => {
-    await boot({ guard: 'allowAll' });
+  it('草稿预览需凭证：匿名 ?status=all → 403；带凭证可读且禁止共享缓存', async () => {
+    await boot({ guard: 'allowAll', manageToken: 'preview-tk' });
     await content().create({ type: 'posts', tenantId: 'tenant01', data: POST, actor });
-    const res = await api.request('/api/v1/posts?status=all');
-    expect(((await res.json()) as { total: number }).total).toBe(1);
+
+    // 匿名：草稿列表不可读（修复前这里完全公开）
+    const anon = await api.request('/api/v1/posts?status=all');
+    expect(anon.status).toBe(403);
+
+    // 带预览凭证：可读，且响应不进共享缓存
+    const preview = await api.request('/api/v1/posts?status=all', {
+      headers: { authorization: 'Bearer preview-tk' },
+    });
+    expect(preview.status).toBe(200);
+    expect(((await preview.json()) as { total: number }).total).toBe(1);
+    expect(preview.headers.get('cache-control')).toContain('no-store');
   });
 });
 
