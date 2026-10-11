@@ -124,6 +124,25 @@ export const api = {
   health: () => request<{ ok: boolean }>('GET', '/healthz'),
 };
 
+// ==================== 全文检索 ====================
+// 服务端为 /api/v1/search（中文单字切分 + 预览门）。管理端要搜到草稿，
+// 故固定带 status=all —— 该参数属于预览读取，必须携带凭证（管理端已登录）。
+
+export interface SearchHit {
+  id: string;
+  score: number;
+  document: EntryItem;
+}
+
+export const searchApi = {
+  search: (params: { q: string; type?: string; limit?: number }) => {
+    const qs = new URLSearchParams({ q: params.q, status: 'all' });
+    if (params.type) qs.set('type', params.type);
+    qs.set('limit', String(params.limit ?? 50));
+    return request<{ items: SearchHit[]; total: number }>('GET', `/api/v1/search?${qs}`);
+  },
+};
+
 // ==================== 类型管理（决策 #26：类型定义是数据） ====================
 // 类型直接复用内核原语（单一事实来源），不复制定义
 
