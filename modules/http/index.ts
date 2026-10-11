@@ -8,6 +8,7 @@ import type { PlatformModule } from '@kernel/contracts/module.contract.js';
 import { Tokens } from '@kernel/registry.js';
 import { buildApp, type HttpApp } from './internal/app.js';
 import { bearerTokenGuard, allowAllGuard, type RequestGuard } from './internal/guard.js';
+import { createMemoryRateLimit, type RateLimitPolicy } from './internal/rate-limit.js';
 
 export type { HttpApp };
 
@@ -25,6 +26,23 @@ export interface HttpModuleOptions {
   manageToken?: string;
   /** 管理后台静态资源目录（如 'dist/admin'；不传则不托管） */
   staticDir?: string;
+  /**
+   * 限流。**默认开启**（60s 窗口，按 IP：Content API 120 次 / 登录 10 次）。
+   * `{ enabled: false }` 关闭；也可注入自定义策略（如多实例共享的外置限流）。
+   */
+  rateLimit?: {
+    enabled?: boolean;
+    /** 窗口长度（秒），默认 60 */
+    windowSeconds?: number;
+    /** 桶上限（防限流器自身被 key 泛滥打爆），默认 10000 */
+    maxKeys?: number;
+    /** Content API 每窗口每 IP 额度，默认 120 */
+    apiMax?: number;
+    /** 登录端点每窗口每 IP 额度（防爆破），默认 10 */
+    loginMax?: number;
+    /** 自定义限流策略（不传则用进程内固定窗口） */
+    policy?: RateLimitPolicy;
+  };
 }
 
 export function httpModule(options: HttpModuleOptions = {}): PlatformModule {
@@ -49,7 +67,20 @@ export function httpModule(options: HttpModuleOptions = {}): PlatformModule {
       // 通用管理端点惰性解析：audit/settings 由各模块自行注册（加载顺序无关）
       const manageToken =
         options.manageToken ?? (config['manageToken'] as string | undefined) ?? process.env['MANAGE_TOKEN'];
-      const app = buildApp({ content, guard, tenantId, staticDir, registry, manageToken });
+
+      const rl = options.rateLimit;
+      const rateLimit =
+        rl?.enabled === false
+          ? undefined
+          : {
+              policy:
+                rl?.policy ??
+                createMemoryRateLimit({ windowSeconds: rl?.windowSeconds, maxKeys: rl?.maxKeys }),
+              apiMax: rl?.apiMax ?? 120,
+              loginMax: rl?.loginMax ?? 10,
+            };
+
+      const app = buildApp({ content, guard, tenantId, staticDir, registry, manageToken, rateLimit });
       registry.provide<HttpApp>(HttpTokens.App, app);
     },
   };

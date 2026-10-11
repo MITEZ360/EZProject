@@ -19,6 +19,7 @@ import type { Principal } from '@kernel/primitives/principal.js';
 import type { Registry } from '@kernel/registry.js';
 import { statusOf, errorBody } from './errors.js';
 import { parseFilters } from './filters.js';
+import { clientIp, type RateLimitPolicy } from './rate-limit.js';
 import type { RequestGuard } from './guard.js';
 
 /** Hono 上下文变量类型（中间件与路由间传递的主体/租户） */
@@ -47,6 +48,17 @@ export interface HttpDeps {
   manageToken?: string;
   /** 管理后台静态资源目录（相对 cwd，如 'dist/admin'）；不传则不托管 */
   staticDir?: string;
+  /**
+   * 限流（不传则不限流）。只作用于匿名可及的高风险入口：
+   * `/api/v1/*`（对外只读、易被爬）与登录端点（防爆破）。
+   */
+  rateLimit?: {
+    policy: RateLimitPolicy;
+    /** Content API：每窗口每 IP 额度 */
+    apiMax: number;
+    /** 登录端点：每窗口每 IP 额度 */
+    loginMax: number;
+  };
 }
 
 const notFound = (c: { json: (b: unknown, s?: number) => unknown }): Response =>
@@ -54,6 +66,37 @@ const notFound = (c: { json: (b: unknown, s?: number) => unknown }): Response =>
 
 export function buildApp(deps: HttpDeps): Hono<Vars> {
   const app = new Hono<Vars>();
+
+  // ---------- 限流（最先执行：挡在鉴权与业务之前） ----------
+  // 只对匿名可及的高风险入口生效；静态资源与 /healthz 不限，避免拖慢页面加载。
+  const rl = deps.rateLimit;
+  if (rl) {
+    app.use('*', async (c, next) => {
+      const path = c.req.path;
+      const isLogin = path === '/api/manage/v1/auth/login';
+      const isPublicApi = path === '/api/v1' || path.startsWith('/api/v1/');
+      if (!isLogin && !isPublicApi) return next();
+
+      const ip = clientIp(c.req.raw.headers);
+      const verdict = isLogin
+        ? rl.policy.check(`login:${ip}`, rl.loginMax)
+        : rl.policy.check(`api:${ip}`, rl.apiMax);
+
+      if (!verdict.allowed) {
+        c.header('retry-after', String(verdict.retryAfterSeconds));
+        return c.json(
+          {
+            error: {
+              code: 'E_RATE_LIMITED',
+              message: `请求过于频繁，请 ${verdict.retryAfterSeconds} 秒后重试`,
+            },
+          },
+          429
+        );
+      }
+      await next();
+    });
+  }
 
   // ---------- Content API（对外 · 只读 · 匿名 · 可缓存） ----------
   const contentApi = new Hono<Vars>();
@@ -75,6 +118,30 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     const value = await produce();
     await cache.set(ck, value, 60);
     return { value, hit: false };
+  };
+
+  /**
+   * 预览门（Content API 的读权限）：
+   * 公开只读**仅限 published**；非 published（草稿）与 `status=all` 必须带有效凭证。
+   * 凭证 = JWT 访问令牌（authz 模块在场时）或引导令牌（单机/调试形态）。
+   *
+   * 安全约束（两条都不能省）：
+   *  1. 预览响应一律 `private, no-store`；
+   *  2. 预览读取**绕过共享缓存**（不读不写）——否则草稿会经缓存泄漏给匿名请求。
+   */
+  const previewPrincipal = async (c: Context<Vars>): Promise<Principal | null> => {
+    const m = /^Bearer\s+(.+)$/i.exec(c.req.header('authorization') ?? '');
+    const token = m?.[1];
+    if (!token) return null;
+    const identity = deps.registry.get<IdentityService>('identity');
+    if (identity) {
+      const p = await identity.verifyAccessToken(token);
+      if (p) return p;
+    }
+    if (deps.manageToken && token === deps.manageToken) {
+      return { id: 'bootstrap', tenantId: deps.tenantId, kind: 'bootstrap' };
+    }
+    return null;
   };
 
   // GET /api/v1/assets/:id —— 资产下载/回源（公开读；长缓存）
@@ -99,8 +166,19 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     if (errors.length > 0) {
       return c.json({ error: { code: 'E_VALIDATION', message: errors.join('；') } }, 400);
     }
+
+    // 预览门：status 非 published（含 all）属于草稿读取，必须带凭证
+    const wantsPreview = status !== 'published';
+    const principal = wantsPreview ? await previewPrincipal(c) : null;
+    if (wantsPreview && !principal) {
+      return c.json(
+        { error: { code: 'E_FORBIDDEN', message: 'status 非 published 的查询需要凭证（预览）' } },
+        403
+      );
+    }
+
     const tenantId = q['tenant'] ?? deps.tenantId;
-    const { value, hit } = await withCache(tenantId, c.req.path + '?' + new URL(c.req.url).search, () =>
+    const produce = (): Promise<unknown> =>
       deps.content.find({
         type,
         tenantId,
@@ -109,31 +187,52 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
         filters: filters.length > 0 ? filters : undefined,
         limit: q['limit'] ? Math.min(Number(q['limit']), 100) : 20,
         offset: q['offset'] ? Number(q['offset']) : 0,
-      })
-    );
+      });
+
+    // 预览请求**绕过共享缓存**（不读不写）——草稿绝不落公共缓存
+    const { value, hit } = principal
+      ? { value: await produce(), hit: false }
+      : await withCache(tenantId, c.req.path + '?' + new URL(c.req.url).search, produce);
+
     const page = value as { items: unknown[]; total: number };
     if (hit) c.header('x-cache', 'HIT');
-    c.header('Cache-Control', 'public, max-age=60'); // 对外只读，可进 CDN
+    // 匿名读可进 CDN；预览响应禁止共享缓存
+    c.header('Cache-Control', principal ? 'private, no-store' : 'public, max-age=60');
     return c.json({ items: page.items, total: page.total });
   });
 
   // GET /api/v1/:type/:key —— key 为 UUID 时按 id，否则按 slug
+  // 匿名只可见 published；草稿/全部状态需凭证
   contentApi.get('/:type/:key', async (c) => {
     const type = c.req.param('type');
     const key = c.req.param('key');
     const tenantId = c.req.query('tenant') ?? deps.tenantId;
-    const status = c.req.query('status') ?? 'published';
+    const statusParam = c.req.query('status');
+    const principal = await previewPrincipal(c);
 
     let entity: Record<string, unknown> | null = null;
     if (UUID_RE.test(key)) {
+      // findOne 不过滤 status：先取回，再按凭证判定可见性
       const found = await deps.content.findOne(key, tenantId);
       if (found && found.type === type) entity = found as unknown as Record<string, unknown>;
     } else {
-      const page = await deps.content.find({ type, tenantId, status, filter: { slug: key }, limit: 1 });
+      // 无凭证时强制 published（忽略调用方的 status 参数）；有凭证才按参数取
+      const status = principal ? (statusParam ?? 'published') : 'published';
+      const page = await deps.content.find({
+        type,
+        tenantId,
+        status: status === 'all' ? undefined : status,
+        filter: { slug: key },
+        limit: 1,
+      });
       entity = (page.items[0] as unknown as Record<string, unknown>) ?? null;
     }
+
+    // 非 published 且无凭证 → 404（不泄漏"此处存在一篇草稿"）
+    if (entity && !principal && entity['status'] !== 'published') entity = null;
     if (!entity) return c.json({ error: { code: 'E_NOT_FOUND', message: '条目不存在' } }, 404);
-    c.header('Cache-Control', 'public, max-age=60');
+
+    c.header('Cache-Control', principal ? 'private, no-store' : 'public, max-age=60');
     return c.json(entity);
   });
 

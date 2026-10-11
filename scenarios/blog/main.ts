@@ -33,6 +33,8 @@ async function main(): Promise<void> {
       manageToken: process.env['MANAGE_TOKEN'] ?? 'dev-only-token',
       // 管理后台静态资源（make build-admin 产出 dist/admin）
       staticDir: process.env['ADMIN_STATIC_DIR'] ?? 'dist/admin',
+      // RATE_LIMIT_DISABLED=1 关闭限流（本地压测/内网无代理部署时用）
+      ...(process.env['RATE_LIMIT_DISABLED'] === '1' ? { rateLimit: { enabled: false } } : {}),
     },
   });
 

@@ -759,24 +759,24 @@ bun build ./scenarios/blog/main.ts --compile --outfile dist/app
 ## 9. 分阶段落地路线
 
 ### 阶段一：内核 + 存储 + 内容（2–4 周）—— 覆盖场景 A/B 基础
-- [ ] 搭 TS + Bun + Hono 骨架
-- [ ] **实现内核**：内容原语、事件总线、注册表、契约接口
-- [ ] **实现存储模块**：`StorageDriver` 契约 + **SQLite 策略** + 工厂/注册表
-- [ ] **实现内容模块**：`ContentService` 契约 + 最小实现（内存或 SQLite）
-- [ ] 内容类型定义（2–3 个）+ 基础 CRUD
-- [ ] Content API（只读、字段裁剪、分页、`/v1/` 前缀）
-- [ ] React 后台（列表 + 编辑，消费 Content API）
-- [ ] **自包含交付**：`bun --compile` 出可执行文件（或 `make package` 出压缩包），跑通
-- [ ] `tenant_id` 全部就位（即使只有默认租户）
+- [x] 搭 TS + Bun + Hono 骨架
+- [x] **实现内核**：内容原语、事件总线、注册表、契约接口
+- [x] **实现存储模块**：`StorageDriver` 契约 + **SQLite 策略** + 工厂/注册表
+- [x] **实现内容模块**：`ContentService` 契约 + 最小实现（内存或 SQLite）
+- [x] 内容类型定义（2–3 个）+ 基础 CRUD（并扩展为**运行时动态建类型**）
+- [x] Content API（只读、分页、`/v1/` 前缀；字段裁剪待做）
+- [x] React 后台（列表 + 编辑，消费 Content API）
+- [x] **自包含交付**：`make package` 压缩包（`bun --compile` 因原生模块不可行，见 8.1）
+- [x] `tenant_id` 全部就位（即使只有默认租户）
 
 **验收**：交付物（二进制或压缩包）拷到一台**没装任何环境**的机器上能跑起来，浏览器进后台能管理内容；**换配置能切到 Postgres**（验证策略模式）。
 
 ### 阶段二：多端增强 —— 夯实场景 B
-- [ ] CDN / 缓存策略（`CacheProvider` 策略：内存/Redis/无）
-- [ ] API 版本化、限流
-- [ ] 多语言（locale）
-- [ ] 媒体处理（`StorageProvider` 策略：本地/S3）
-- [ ] 内容预览
+- [x] CDN / 缓存策略（`CacheProvider` 策略：**内存 LRU（有界）/ 无**已实现；Redis 待需要时补）
+- [x] API 版本化（`/v1/` 自始就位）、**限流**（模块内策略：内存固定窗口，按 IP；Content API 与登录端点分档）
+- [x] 多语言（locale；实体级 + 无结果回退 default）
+- [x] 媒体处理（`AssetStore` 策略：**本地文件系统**已实现；S3 待需要时补）
+- [x] 内容预览（**非 published 读取必须带凭证**；预览响应 `private, no-store` 且绕过共享缓存）
 
 ### 阶段三：多租户（有真实 SaaS 需求时）
 - [ ] 租户管理、配额、计费埋点
