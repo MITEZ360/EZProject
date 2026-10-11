@@ -1,0 +1,70 @@
+{
+  "kernel/contracts/authz.contract.ts": [
+    "export interface AuthzAction {",
+    "export interface AuthzDecision {",
+    "export interface AuthzService {"
+  ],
+  "kernel/contracts/content.contract.ts": [
+    "export interface ContentQuery {",
+    "export interface ContentPage {",
+    "export interface ContentCreateInput {",
+    "export interface ContentUpdateInput {",
+    "export interface ContentService {"
+  ],
+  "kernel/contracts/module.contract.ts": [
+    "export interface ModuleContext {",
+    "export interface PlatformModule {"
+  ],
+  "kernel/contracts/search.contract.ts": [
+    "export interface SearchQuery {",
+    "export interface SearchHit<T = Record<string, unknown>> {",
+    "export interface SearchResult<T = Record<string, unknown>> {",
+    "export interface SearchProvider {"
+  ],
+  "kernel/contracts/storage.contract.ts": [
+    "export type Dialect = 'sqlite' | 'postgres' | 'mysql';",
+    "export interface QuerySpec {",
+    "export interface StorageTx {",
+    "export interface StorageDriver {"
+  ],
+  "kernel/primitives/entity.ts": [
+    "export type FieldType = | 'text' | 'number' | 'boolean' | 'richText' | 'media' | 'relation' | 'select' | 'json';",
+    "export interface FieldDef {",
+    "export interface EntityTypeDef {",
+    "export interface Entity {"
+  ],
+  "kernel/primitives/id.ts": [
+    "export function newId(): string {",
+    "export function newTenantId(): string {",
+    "export function isValidTenantId(id: string): boolean {",
+    "export const NOT_DELETED = 0;",
+    "export const notDeleted = (): { deletedAt: number } => ({ deletedAt: NOT_DELETED });",
+    "export const markDeleted = (): { deletedAt: number } => ({ deletedAt: Date.now() });",
+    "export const isActive = (deletedAt: number): boolean => deletedAt === NOT_DELETED;"
+  ],
+  "kernel/primitives/portable-text.ts": [
+    "export type PortableText = PortableTextBlock[];",
+    "export type PortableTextBlock = TextBlock | ImageBlock | CodeBlock | CustomBlock;",
+    "export type TextBlockStyle = 'normal' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'blockquote';",
+    "export interface TextBlock {",
+    "export interface Span {",
+    "export interface MarkDef {",
+    "export interface ImageBlock {",
+    "export interface CodeBlock {",
+    "export interface CustomBlock {",
+    "export function isPortableText(value: unknown): value is PortableText {"
+  ],
+  "kernel/primitives/principal.ts": [
+    "export interface Principal {",
+    "export const systemPrincipal = (tenantId: string): Principal => ({"
+  ],
+  "kernel/primitives/result.ts": [
+    "export interface PlatformError {",
+    "export type Result<T, E = PlatformError> = | { ok: true; value: T }",
+    "export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value });",
+    "export const err = <E = PlatformError>(error: E): Result<never, E> => ({",
+    "export const platformError = ( code: string, message: string, details?: Record<string, unknown> ): PlatformError => (details ? { code, message, details } : { code, message });",
+    "export const isOk = <T, E>(r: Result<T, E>): r is { ok: true; value: T } => r.ok;",
+    "export const isErr = <T, E>(r: Result<T, E>): r is { ok: false; error: E } => !r.ok;"
+  ]
+}

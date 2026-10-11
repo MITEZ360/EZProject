@@ -21,6 +21,24 @@
 - **交付理念**：目标为**自包含**（目标机器零环境依赖）；**单二进制只是首选实现，压缩包/容器同样可选**（design 8.1 + README）
 - **分支策略**：新增 `docs/git-workflow.md`——`kernel`/`main` 双长期分支、前缀式短分支命名、内核额外把关、`kernel → main` 定期同步
 
+## [0.1.0] - 2026-10-11 · 内核骨架跑通
+
+### Added
+- **内核**：`kernel/` 原语（result / id[UUIDv7+租户短id] / entity / principal / portable-text+Zod）、事件总线、契约（storage / content / module / authz / search）、注册表、bootstrap（模块子集可启动）、唯一出口
+- **存储模块**：二维策略表（逻辑类型×方言）、SQLite 策略（`better-sqlite3`）、策略工厂（唯一选择点）
+- **内容模块**：写入强制 Portable Text 校验（铁律）、软删除、类型定义驱动
+- **博客场景**：数据驱动类型定义 + 可运行入口 + 启动自检日志
+- **工程链**：tsconfig(strict+别名)、eslint 边界规则、CI 扫描（内核词汇 / 方言分支 / 契约快照）、Makefile、vitest
+- **测试**：单元 28 + 启动 9（可拔插/切方言/内容铁律）+ 交付 2（压缩包隔离运行）
+- **交付**：`make package` 出自包含压缩包（解压即用，不依赖目标机器环境）
+
+### Changed
+- 运行时策略：**验证链与运行走 Node；Bun 仅用于 install/build**（`better-sqlite3` 原生模块在 Bun 下不可用）
+
+### 验证（机器判定，全绿）
+- `make verify`：typecheck + lint + 扫描 + 单测
+- `make verify-full`：+ 启动测试 + 契约快照 + 交付测试
+
 ### Changed
 - 富文本格式表述：由"兼容 Portable Text"改为**"严格遵循 Portable Text 规范"**
 - 定位表述：约束由"部署极简/资源占用低"改为"**交付自包含、依赖少、方便直观**"；清除各处"极致单文件/极致省空间"措辞
