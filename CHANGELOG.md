@@ -13,12 +13,16 @@
 - **管理端归位**：`scenarios/blog/admin` → `scenarios/generic-cms/admin`（通用 CMS 管理端）；内容视图按类型定义动态渲染（零写死字段），App 壳零业务词汇；博客场景复用通用 admin、仅保留类型种子
 
 ### Added
+- **Content API 过滤查询**：`?filter[字段][操作]=值`（eq/ne/gt/gte/lt/lte/in/contains；非保留字段自动落 `data.*`，对外不暴露存储形状）；`ContentQuery.filters` 契约；find/count 同一套条件
+- **`scenarios/generic-cms` 通用 CMS 场景**：storage+content(无内建类型)+http+audit+settings；Makefile 交付物切换至通用 CMS
+- **后台**：审计日志页（事件筛选）+ 系统设置页（KV 编辑）
 - **通用管理模块首批**：`modules/audit`（订阅领域事件落审计日志，宪法三正用）+ `modules/settings`（per-tenant KV）；content 发布 `content.entry.*` 领域事件；HTTP 新增 `/api/manage/v1/audit-logs` 与 `/settings`（惰性解析，模块加载顺序无关）
 - **存储契约 v2**：`QueryFilter`（JSON 字段点路径，eq/ne/gt/gte/lt/lte/in/contains，SQLite json_extract 落地）+ `StorageTx.exec`（模块私有表 DDL）+ `StorageDriver.registerTable`
 - **决策 #26 第三步落地**：后台"类型管理"视图——类型列表/新建/编辑（字段动态增删 + 11 种调色板下拉），消费 `/api/manage/v1/types`；类型定义复用内核原语
 - **决策 #26 第二步落地**：`defineType` 落库（逻辑 Schema：类型定义是数据，更新不迁移旧数据）+ `listTypes`/`getType` 契约 + 类型管理 API（`POST/GET /api/manage/v1/types`）+ 跨重启持久化验证
 
 ### Fixed
+- **UUIDv7 同毫秒单调递增**：原实现同毫秒尾部随机导致按 id 排序不稳定（审计 tie-break 偶发失败）；改为 48位时间戳+12位同毫秒序号+62位随机
 - **SQLite 驱动事务并发缺陷**：单连接上并发 `transaction()` 调用（如 `Promise.all`）交错污染事务（`no such savepoint`）→ 外层调用排队互斥、嵌套调用放行（SAVEPOINT 语义不受影响）
 - **决策 #26 第一步落地**：`FieldDef` 契约演进（11 种调色板 + 通用选项）+ 校验器全类型实现（component 递归 ≤3、未知字段拒绝、dateOnly UTC 零点）；契约快照更新（core/field-type-palette → kernel → main）
 - **决策 #26（定稿）**：内容字段类型集 v1——11 种调色板（text/longText/number/boolean/date/select/richText/component/relation/media/json）+ 通用选项 + 明示取舍（字段级唯一软校验、实体级多语言）+ 查询效率三层保障（顶层列 / JSON 查询经策略表 / 物化字段后手）；逻辑 Schema 路线（类型定义是数据，不跑 DDL）（engineering-spec 4.2.1 + design 6.7）

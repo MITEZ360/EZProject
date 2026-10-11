@@ -397,3 +397,30 @@ engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/ed
 - [ ] 后台"审计日志/系统设置"页面（消费新端点）
 
 ---
+
+## 2026-10-11 · Content API 过滤 + 通用 CMS 场景 + 后台审计/设置页（分支 `feature/api-filters`）
+
+**做了什么**：
+- **契约**（`core/content-query-filters` → kernel → main）：`ContentQuery.filters?: QueryFilter[]`；服务层 find 与 count 用**同一套 filters**
+- **HTTP 过滤查询**（决策 #26 查询承诺透出到 API）：
+  - `?filter[字段][操作]=值`（eq/ne/gt/gte/lt/lte/in/contains），值类型推断（数字/布尔/逗号数组）
+  - **非保留字段自动落 `data.*`**——对外不暴露存储形状（`filter[price][gte]=50` 而非 `filter[data.price]`）
+  - 非法字段路径/操作符 → 400（不静默忽略）
+- **`scenarios/generic-cms` 场景**（通用 CMS 主产品形态）：
+  - 装配 storage + content（**无内建类型**）+ http + audit + settings
+  - `main.ts` 入口（--selfcheck 支持）；**Makefile 交付物从 blog 切到 generic-cms**
+- **后台两页**：审计日志（事件筛选）、系统设置（KV 编辑，值任意 JSON）
+  - 模块未挂载时明确提示（404 → "审计模块未挂载"），不静默空白
+
+**关键修正（测试逼出来的）**：
+- **UUIDv7 同毫秒单调**（`core/uuidv7-monotonic`）：原实现同毫秒尾部随机 → 按 id 排序不稳定（审计测试偶发失败）；
+  改为 48位时间戳 + **12位同毫秒序号** + 62位随机；补 200 个 id 排序稳定性测试
+- 冒烟手法纠正：URL 中 `[` `]` 需转义（%5B/%5D），否则 curl 通配展开导致假失败
+
+**验证**：全套 **104/104**；端到端冒烟 9/9（定义类型→建条目→范围过滤→数组包含→非法 400→审计→设置→后台页）。
+
+**遗留**：
+- [ ] authz 模块（用户/权限/登录态，涉及 token/session 设计——需先讨论）
+- [ ] blog 场景保留为"专用 CMS 示例"（前台展示待做）
+
+---
