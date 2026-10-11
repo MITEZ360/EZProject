@@ -371,3 +371,29 @@ engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/ed
 **沉淀**：通用能力归位模块层/通用场景；具体场景 = 类型种子 + 前台展示（待做）+ 场景特有配置。
 
 ---
+
+## 2026-10-11 · 通用管理模块 + JSON 字段查询（分支 `feature/generic-admin-modules`）
+
+**做了什么**（决策 #26 第四步 + 通用管理模块首批）：
+- **存储契约 v2**（`core/storage-contract-v2` → kernel → main）：
+  - `QueryFilter`：eq/ne/gt/gte/lt/lte/in/contains，字段支持点路径（`data.price`）——决策 #26 的 JSON 查询承诺兑现
+  - `StorageTx.exec`：仅限模块私有表 DDL；`StorageDriver.registerTable`：私有表结构登记（防拼错表名防护保留）
+- **content 发布领域事件**：`content.entry.created/updated/deleted`（宪法三启用）；`remove` 补齐一直缺失的 `actor` 参数
+- **modules/audit**：订阅事件落私有表 audit_logs（**宪法三正用**：只听事件、不知道 content）；排序 occurredAt + UUIDv7 次级（同毫秒稳定）
+- **modules/settings**：per-tenant KV（值任意 JSON），upsert，键格式校验
+- **HTTP 惰性解析**：`/api/manage/v1/audit-logs` 与 `/settings` 路由恒挂载、请求时从注册表解析能力——模块加载顺序无关，未挂载返回 404 JSON
+- **JSON 列序列化修正**：字符串值也 stringify（否则读回解析炸）
+
+**过程中发现的架构缺口与修正**：
+- HTTP 最初在 setup 时快照 audit/settings → 模块顺序依赖（audit 排在 http 后就失效）→ 改惰性解析
+- 驱动 `TABLE_SCHEMAS` 白名单挡住了模块私有表 → registerTable 契约
+- **纪律修正**：core 分支误提交了模块实现 → 已从 kernel 分支移除（kernel 只装 kernel/ 目录）
+
+**验证**：全套 **98/98**（新增 filters 5 + admin-modules 7）；三扫描全绿。
+
+**遗留**：
+- [ ] authz 模块（用户/权限/登录态）——涉及 token/session 设计，单独讨论后做
+- [ ] JSON 查询的 API 层透出（Content API query 参数 → QueryFilter）
+- [ ] 后台"审计日志/系统设置"页面（消费新端点）
+
+---
