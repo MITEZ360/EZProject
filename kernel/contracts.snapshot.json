@@ -24,6 +24,7 @@
   "kernel/contracts/storage.contract.ts": [
     "export type Dialect = 'sqlite' | 'postgres' | 'mysql';",
     "export interface QuerySpec {",
+    "export interface QueryFilter {",
     "export interface StorageTx {",
     "export interface StorageDriver {"
   ],
