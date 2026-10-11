@@ -1,11 +1,16 @@
 // modules/http/internal/app.ts
-// Hono 应用构建：Content API（只读/匿名/可缓存）+ Management API（写/守卫）。
-// 只依赖内核契约与 content 模块对外的 ContentService（经注册表注入），不 import 其他模块实现。
+// Hono 应用构建：Content API（只读/匿名/可缓存）+ Management API（写/守卫）+ 通用管理端点。
+// 只依赖内核契约（经注册表注入），不 import 其他模块实现。
+// 通用管理端点（audit/settings）**惰性解析**：路由恒挂载，请求时从注册表解析能力——
+// 模块加载顺序无关；模块未加载时返回 404 JSON。
 
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import type { ContentService } from '@kernel/contracts/content.contract.js';
+import type { AuditService } from '@kernel/contracts/audit.contract.js';
+import type { SettingsService } from '@kernel/contracts/settings.contract.js';
 import type { Principal } from '@kernel/primitives/principal.js';
+import type { Registry } from '@kernel/registry.js';
 import { statusOf, errorBody } from './errors.js';
 import type { RequestGuard } from './guard.js';
 
@@ -24,9 +29,14 @@ export interface HttpDeps {
   guard: RequestGuard;
   /** 默认租户（场景注入；单租户场景的便捷） */
   tenantId: string;
+  /** 注册表（惰性解析可选能力：audit/settings） */
+  registry: Registry;
   /** 管理后台静态资源目录（相对 cwd，如 'dist/admin'）；不传则不托管 */
   staticDir?: string;
 }
+
+const notFound = (c: { json: (b: unknown, s?: number) => unknown }): Response =>
+  c.json({ error: { code: 'E_NOT_FOUND', message: '能力未挂载（模块未加载）' } }, 404) as Response;
 
 export function buildApp(deps: HttpDeps): Hono<Vars> {
   const app = new Hono<Vars>();
@@ -86,13 +96,51 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     await next();
   });
 
+  // 注意：所有固定路径路由（types/audit-logs/settings）必须注册在 /:type 通配之前
+
+  // GET /api/manage/v1/audit-logs（audit 模块贡献；未加载 → 404 JSON）
+  manage.get('/audit-logs', async (c) => {
+    const audit = deps.registry.get<AuditService>('audit');
+    if (!audit) return notFound(c);
+    const tenantId = c.get('tenantId') as string;
+    const items = await audit.list({
+      tenantId,
+      event: c.req.query('event'),
+      limit: c.req.query('limit') ? Math.min(Number(c.req.query('limit')), 500) : 100,
+    });
+    return c.json({ items });
+  });
+
+  // GET /api/manage/v1/settings（settings 模块贡献）
+  manage.get('/settings', async (c) => {
+    const settings = deps.registry.get<SettingsService>('settings');
+    if (!settings) return notFound(c);
+    return c.json({ items: await settings.list(c.get('tenantId') as string) });
+  });
+
+  // PUT /api/manage/v1/settings/:key
+  manage.put('/settings/:key', async (c) => {
+    const settings = deps.registry.get<SettingsService>('settings');
+    if (!settings) return notFound(c);
+    const tenantId = c.get('tenantId') as string;
+    const key = c.req.param('key');
+    const body = await c.req.json().catch(() => null);
+    if (body === null || typeof body !== 'object' || !('value' in (body as object))) {
+      return c.json({ error: { code: 'E_VALIDATION', message: '请求体需为 {"value": ...}' } }, 400);
+    }
+    try {
+      await settings.set(tenantId, key, (body as { value: unknown }).value);
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json(errorBody(e), statusOf(e) === 500 ? 400 : statusOf(e));
+    }
+  });
+
   // ---------- 类型管理（决策 #26：类型定义是数据） ----------
-  // 注意：必须注册在 /:type 通配路由之前
 
   // GET /api/manage/v1/types —— 类型定义列表
   manage.get('/types', async (c) => {
-    const tenantId = c.get('tenantId') as string;
-    return c.json({ items: await deps.content.listTypes(tenantId) });
+    return c.json({ items: await deps.content.listTypes(c.get('tenantId') as string) });
   });
 
   // POST /api/manage/v1/types —— 定义/更新内容类型（逻辑 Schema，不迁移旧数据）
@@ -151,11 +199,7 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     const data = { ...(body as Record<string, unknown>) };
     delete data['locale'];
     try {
-      const entity = await deps.content.update(id, {
-        tenantId,
-        data,
-        actor: principal,
-      });
+      const entity = await deps.content.update(id, { tenantId, data, actor: principal });
       return c.json(entity);
     } catch (e) {
       return c.json(errorBody(e), statusOf(e));
@@ -165,9 +209,8 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
   // DELETE /api/manage/v1/:type/:id —— 软删除
   manage.delete('/:type/:id', async (c) => {
     const principal = c.get('principal') as Principal;
-    const tenantId = c.get('tenantId') as string;
     try {
-      await deps.content.remove(c.req.param('id'), tenantId, principal);
+      await deps.content.remove(c.req.param('id'), c.get('tenantId') as string, principal);
       return c.json({ ok: true });
     } catch (e) {
       return c.json(errorBody(e), statusOf(e));

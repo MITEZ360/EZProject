@@ -13,6 +13,7 @@ import type {
   ContentUpdateInput,
 } from '@kernel/contracts/content.contract.js';
 import type { StorageDriver } from '@kernel/contracts/storage.contract.js';
+import type { EventBus } from '@kernel/events/types.js';
 import { newId, notDeleted } from '@kernel/primitives/id.js';
 import { platformError, type Result, ok, err } from '@kernel/primitives/result.js';
 import { validateEntityData, validateTypeDef } from './validate.js';
@@ -42,7 +43,7 @@ interface ContentTypeRow {
   updatedAt: number;
 }
 
-export function createContentService(driver: StorageDriver): ContentService {
+export function createContentService(driver: StorageDriver, events?: EventBus): ContentService {
   const svc = {
     /** 定义/更新内容类型：落 content_types（逻辑 Schema，不迁移旧数据）。
      *  actor.tenantId 为 '*' 时写入通配定义（代码内建类型的种子）。 */
@@ -169,6 +170,7 @@ export function createContentService(driver: StorageDriver): ContentService {
         deletedAt: 0,
       };
       await driver.transaction((tx) => tx.insert(TABLE, entity));
+      await emit('created', entity, input.actor);
       return entity as unknown as Entity;
     },
 
@@ -194,20 +196,38 @@ export function createContentService(driver: StorageDriver): ContentService {
       const updated = await driver.transaction((tx) =>
         tx.update<EntryRow>(TABLE, id, patch)
       );
+      await emit('updated', updated, input.actor);
       return updated as unknown as Entity;
     },
 
-    async remove(id: string, tenantId: string): Promise<void> {
+    async remove(id: string, tenantId: string, actor: Principal): Promise<void> {
       const current = await svc.findOne(id, tenantId);
       if (!current) {
         throw mapError(platformError('E_NOT_FOUND', `条目不存在: ${id}`));
       }
       // 软删除：写哨兵值的反面（真实毫秒）
-      await driver.transaction((tx) =>
+      const removed = await driver.transaction((tx) =>
         tx.update<EntryRow>(TABLE, id, { deletedAt: Date.now(), updatedAt: Date.now() })
       );
+      await emit('deleted', removed, actor);
     },
   };
+
+  /** 领域事件（宪法三）：audit 等模块订阅这些名字，content 不知道谁在听 */
+  const emit = async (
+    action: 'created' | 'updated' | 'deleted',
+    entry: EntryRow,
+    actor: Principal
+  ): Promise<void> => {
+    if (!events) return;
+    await events.publish({
+      name: `content.entry.${action}`,
+      tenantId: entry.tenantId,
+      occurredAt: Date.now(),
+      payload: { id: entry.id, type: entry.type, slug: entry.slug, actorId: actor.id },
+    });
+  };
+
   return svc;
 }
 

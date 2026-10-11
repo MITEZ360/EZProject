@@ -15,9 +15,9 @@ export function contentModule(types: EntityTypeDef[] = []): PlatformModule {
     name: 'content',
     dependsOn: ['storage'],
 
-    async setup({ registry }): Promise<void> {
+    async setup({ registry, events }): Promise<void> {
       const driver = registry.require<StorageDriver>(Tokens.Storage);
-      const service = createContentService(driver);
+      const service = createContentService(driver, events);
 
       // 代码内建类型：以 '*' 通配租户为种子落库（幂等 upsert）；
       // 运行时经 defineType 定义的类型落具体租户名下（决策 #26 逻辑 Schema）。

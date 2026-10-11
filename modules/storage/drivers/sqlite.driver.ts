@@ -8,6 +8,7 @@ import type {
   QuerySpec,
   StorageDriver,
   StorageTx,
+  TableSchema,
 } from '@kernel/contracts/storage.contract.js';
 
 interface SqliteConfig {
@@ -69,8 +70,13 @@ const TABLE_SCHEMAS: Record<string, { columns: Record<string, string>; jsonColum
   },
 };
 
+/** 表结构注册表：内置表 + 模块经 registerTable 登记的私有表 */
+const declaredSchemas = new Map<string, { columns: Record<string, string>; jsonColumns: string[] }>(
+  Object.entries(TABLE_SCHEMAS).map(([k, v]) => [k, v])
+);
+
 function schemaOf(table: string) {
-  const s = TABLE_SCHEMAS[table];
+  const s = declaredSchemas.get(table);
   if (!s) throw new StorageError('E_STORAGE', `[storage] 未声明的表结构: ${table}`);
   return s;
 }
@@ -83,7 +89,8 @@ function toRow(table: string, data: Record<string, unknown>): Record<string, unk
   for (const [k, v] of Object.entries(data)) {
     if (v === undefined) continue;
     const phys = columns[k] ?? k;
-    row[phys] = jsonSet.has(k) && typeof v === 'object' && v !== null ? JSON.stringify(v) : v;
+    // JSON 列一律 stringify（字符串值也加引号，保证读回 JSON.parse 恒成功）
+    row[phys] = jsonSet.has(k) ? JSON.stringify(v) : v;
   }
   return row;
 }
@@ -152,7 +159,7 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
     },
 
     async count(spec: QuerySpec): Promise<number> {
-      const { where, params } = buildWhere(spec);
+      const { where, params } = buildConditions(spec);
       try {
         const row = db
           .prepare(`SELECT COUNT(*) AS n FROM ${ident(spec.table)}${where}`)
@@ -161,6 +168,10 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
       } catch (e) {
         throw wrapError(spec.table, e);
       }
+    },
+
+    async exec(sql: string): Promise<void> {
+      db.exec(sql); // 调用方在事务内使用时随事务提交/回滚
     },
 
     async insert<T>(table: string, data: T): Promise<T> {
@@ -213,6 +224,15 @@ export function createSqliteDriver(config: SqliteConfig): StorageDriver {
     dialect: 'sqlite' as const,
     async migrate(): Promise<void> {
       db.exec(DDL);
+    },
+    registerTable(name: string, schema: TableSchema): void {
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+        throw new StorageError('E_STORAGE', `[storage] 非法表名: ${name}`);
+      }
+      declaredSchemas.set(name, {
+        columns: schema.columns ?? {},
+        jsonColumns: schema.jsonColumns ?? [],
+      });
     },
     async transaction<T>(fn: (tx: StorageTx) => Promise<T>): Promise<T> {
       const runTx = async (): Promise<T> => {
@@ -269,21 +289,72 @@ function ident(name: string): string {
   return `"${name}"`;
 }
 
-/** 编译 where 子句 */
-function buildWhere(spec: QuerySpec): { where: string; params: unknown[] } {
-  const where: string[] = [];
-  const params: unknown[] = [];
+/** 编译 where + filters（AND 组合）。顶层列走物理列；点路径走 json_extract。 */
+function buildConditions(spec: QuerySpec): { where: string; params: unknown[] } {
   const { columns } = schemaOf(spec.table);
+  const conds: string[] = [];
+  const params: unknown[] = [];
+
+  const table = spec.table; // schemaOf(spec.table) 已确保是已声明的合法表名
+  /** 'data.price' → json_extract("data", '$.price')；'status' → "entries"."status" */
+  const exprOf = (field: string): string => {
+    const col = field.split('.')[0]?.replace(/["']/g, '') ?? '';
+    if (!field.includes('.')) return `"${table}".${ident(columns[col] ?? col)}`;
+    const jsonPath = field
+      .split('.')
+      .slice(1)
+      .map((p) => p.replace(/["']/g, ''))
+      .join('.');
+    return `json_extract(${ident(col)}, '$.${jsonPath}')`;
+  };
+
   for (const [k, v] of Object.entries(spec.where ?? {})) {
-    where.push(`${ident(columns[k] ?? k)} = ?`);
+    conds.push(`${exprOf(k)} = ?`);
     params.push(v);
   }
-  return { where: where.length ? ` WHERE ${where.join(' AND ')}` : '', params };
+  for (const f of spec.filters ?? []) {
+    const expr = exprOf(f.field);
+    switch (f.op) {
+      case 'eq': conds.push(`${expr} = ?`); params.push(f.value); break;
+      case 'ne': conds.push(`${expr} != ?`); params.push(f.value); break;
+      case 'gt': conds.push(`${expr} > ?`); params.push(f.value); break;
+      case 'gte': conds.push(`${expr} >= ?`); params.push(f.value); break;
+      case 'lt': conds.push(`${expr} < ?`); params.push(f.value); break;
+      case 'lte': conds.push(`${expr} <= ?`); params.push(f.value); break;
+      case 'in': {
+        if (!Array.isArray(f.value)) throw new StorageError('E_STORAGE', 'in 条件的 value 必须为数组');
+        conds.push(`${expr} IN (${f.value.map(() => '?').join(',')})`);
+        params.push(...f.value);
+        break;
+      }
+      case 'contains': {
+        if (Array.isArray(f.value)) {
+          // 数组包含：json_each 展开该 JSON 列
+          const col = f.field.split('.')[0]?.replace(/["']/g, '') ?? '';
+          const jsonPath = f.field
+            .split('.')
+            .slice(1)
+            .map((p) => p.replace(/["']/g, ''))
+            .join('.');
+          const members = f.value.map(() => '?').join(',');
+          conds.push(
+            `EXISTS (SELECT 1 FROM json_each(${ident(col)}, '$.${jsonPath}') WHERE value IN (${members}))`
+          );
+          params.push(...f.value);
+        } else {
+          conds.push(`${expr} LIKE ?`);
+          params.push(`%${String(f.value)}%`);
+        }
+        break;
+      }
+    }
+  }
+  return { where: conds.length ? ` WHERE ${conds.join(' AND ')}` : '', params };
 }
 
 /** 把方言无关 QuerySpec 编成 SQL（仅 sqlite 驱动内部使用） */
 function buildSelect(spec: QuerySpec): { sql: string; params: unknown[] } {
-  const { where, params } = buildWhere(spec);
+  const { where, params } = buildConditions(spec);
   let sql = `SELECT * FROM ${ident(spec.table)}${where}`;
   if (spec.orderBy?.length) {
     const { columns } = schemaOf(spec.table);
