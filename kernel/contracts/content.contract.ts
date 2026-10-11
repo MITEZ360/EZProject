@@ -35,7 +35,13 @@ export interface ContentUpdateInput {
 }
 
 export interface ContentService {
-  defineType(def: EntityTypeDef): Promise<void>;
+  /** 定义/更新内容类型（类型定义是数据：落 content_types，多租户按 actor.tenantId）。
+   *  更新已有定义不迁移旧数据（逻辑 Schema 路线，决策 #26）。 */
+  defineType(def: EntityTypeDef, actor: Principal): Promise<void>;
+  /** 租户下的类型定义列表（含 '*' 通配定义） */
+  listTypes(tenantId: string): Promise<EntityTypeDef[]>;
+  /** 取单个类型定义 */
+  getType(slug: string, tenantId: string): Promise<EntityTypeDef | null>;
   find(query: ContentQuery): Promise<ContentPage>;
   findOne(id: string, tenantId: string): Promise<Entity | null>;
   create(input: ContentCreateInput): Promise<Entity>;
