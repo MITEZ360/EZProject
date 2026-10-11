@@ -1,4 +1,9 @@
 {
+  "kernel/contracts/asset.contract.ts": [
+    "export interface Asset {",
+    "export interface AssetStore {",
+    "export type AssetDialect = 'local' | 's3';"
+  ],
   "kernel/contracts/audit.contract.ts": [
     "export interface AuditEntry {",
     "export interface AuditQuery {",
@@ -8,6 +13,9 @@
     "export interface AuthzAction {",
     "export interface AuthzDecision {",
     "export interface AuthzService {"
+  ],
+  "kernel/contracts/cache.contract.ts": [
+    "export interface CacheProvider {"
   ],
   "kernel/contracts/content.contract.ts": [
     "export interface ContentQuery {",
