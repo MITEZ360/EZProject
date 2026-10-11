@@ -33,4 +33,9 @@ export interface AssetStore {
   list(tenantId: string): Promise<Asset[]>;
 }
 
-export type AssetDialect = 'local' | 's3';
+/**
+ * 资产存储策略枚举（契约明示有哪些实现可插）。
+ * 刻意**不叫 AssetDialect**——"方言"在本项目专指数据库方言（`storage.Dialect`）；
+ * 各模块的策略提供方统一用 provider 术语。
+ */
+export type AssetProviderKind = 'local' | 's3';
