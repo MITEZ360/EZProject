@@ -191,30 +191,72 @@ if (dialect === 'sqlite') { ... } else if (dialect === 'postgres') { ... }
 
 > 结论：**"人工能看出的问题"几乎都能变成 CI 规则或测试。** 把精力花在"把约束翻译成机器可判定的检查"上，而不是花在审 diff 上。
 
-**运行日志怎么用（动态验收）**：
+**日志有两类，都要用**：
 
-1. **启动自检（fail fast）**：启动时打印关键状态，不通过则**直接启动失败**，不带着问题跑。
-   ```
-   [kernel] 已加载契约: content, storage, authz
-   [kernel] 已挂载模块: content, storage
-   [storage] dialect = sqlite (WAL = on)
-   [selfcheck] OK
-   ```
-2. **结构化日志 + 不变量断言**：关键路径打日志，并断言不变式；出现预期外 `ERROR`/`WARN` → CI 判定失败。
-   ```
-   [content] create entry type=posts tenant=default
-   [content] richText 校验通过 (blocks=5)      ← 断言存的是结构
-   [event] published content.entry.published
-   ```
-3. **冒烟测试（Smoke Test）挂 CI**：`bun --compile` 出二进制后，**在 CI 里真跑起来**：
-   启动 → `/health` → 创建内容 → 读出它，**全走真实 HTTP + 日志确认**。任一步失败 → CI 红。
+**① 运行日志**（动态验收，程序跑起来时的输出）：
+- **启动自检（fail fast）**：启动时打印关键状态，不通过则**直接启动失败**。
+  ```
+  [kernel] 已加载契约: content, storage, authz
+  [kernel] 已挂载模块: content, storage
+  [storage] dialect = sqlite (WAL = on)
+  [selfcheck] OK
+  ```
+- **业务路径日志 + 不变量断言**：出现预期外 `ERROR`/`WARN` → 判定失败。
+  ```
+  [content] create entry type=posts tenant=default
+  [content] richText 校验通过 (blocks=5)      ← 断言存的是结构
+  [event] published content.entry.published
+  ```
 
-**唯一保留"人"的地方**：**契约本身的设计是否合理**（如 `StorageDriver` 暴露哪些方法）。
-但即便这里也可降低到几秒——**让 AI 同时产出"契约 + 它的测试 + 它的文档"，你只扫一眼签名和测试，不必审 diff。**
+**② 测试日志**（跑测试时的输出，供 AI 和 CI 直接定位）：
+```
+✓ content.create 返回结构化 body (2ms)
+✗ content.create 期望 Array，实际 string
+    at test/unit/content.test.ts:42
+    expected: Array(5)  received: "<p>hello</p>"
+```
+> 失败时给出**用例名 + 位置 + 期望 vs 实际**——AI 据此就能直接改，不需要人看。
 
 ---
 
-### 4.7 复用"已验证的提示词"，别每次重新描述
+### 4.7 测试分层：日常只跑快的 ⭐⭐（提高开发效率的关键）
+
+**原则**：**测试要分层，日常只跑单元测试（快）；重装备不常用。**
+
+| 类型 | 定位 | 何时跑 | 耗时 |
+|------|------|--------|------|
+| **单元测试** ⭐主力 | 隔离、单点、无 IO | 每次提交 | 毫秒级 |
+| **启动测试** | 能起 + 自检通过 | 里程碑 / 发版前 | 秒级 |
+| **集成测试** | 跨组件、真连库 | 重要变更 / 发版前 | 秒~分钟级 |
+
+**为什么**：**慢测试拖垮迭代节奏。** 日常被集成测试卡住，vibe coding 的速度优势就没了。
+**重装备不是不重要，是不常用**——留给关键节点，日常别碰。
+
+**单元测试的硬约束**（否则它会退化成集成测试）：
+- **无真实 IO**：不连库、不发 HTTP、不读 FS——外部依赖一律 fake 注入。
+- **单点验证**：一个用例只验一个行为，不串长流程。
+- **快**：目标 < 10ms。
+- **架构特性用分层单测验**：
+  ```ts
+  // 验工厂（不连库）
+  expect(createStorageDriver({dialect:'sqlite'})).toBeInstanceOf(SqliteDriver);
+  // 验注册表（用 fake）
+  await reg.mount(fakeModule); expect(reg.has('fake')).toBe(true);
+  // 验内容结构（用 fake storage）
+  expect(Array.isArray(entry.data.body)).toBe(true);
+  ```
+
+**命令分层**（日常快、节点全）：
+```bash
+bun run verify        # ⭐日常：类型 + 单测（几秒）
+bun run verify:full   # 关键节点：+ 启动测试 + 集成测试
+```
+
+**CI 分层**：每次 push 只跑快的；合并 main / 发版前才跑全套。
+
+---
+
+### 4.8 复用"已验证的提示词"，别每次重新描述
 
 **做法**：把有效的提示词**存进本 cookbook**，下次直接复用（如 3.1 的禁用清单、5.1 的三段式）。
 
