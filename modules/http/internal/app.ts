@@ -12,6 +12,7 @@ import type { SettingsService } from '@kernel/contracts/settings.contract.js';
 import type { Principal } from '@kernel/primitives/principal.js';
 import type { Registry } from '@kernel/registry.js';
 import { statusOf, errorBody } from './errors.js';
+import { parseFilters } from './filters.js';
 import type { RequestGuard } from './guard.js';
 
 /** Hono 上下文变量类型（中间件与路由间传递的主体/租户） */
@@ -20,6 +21,11 @@ type Vars = {
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Content API 顶层物理列白名单：其余字段名自动视为内容字段（data.*） */
+const TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set([
+  'id', 'type', 'slug', 'status', 'locale', 'tenantId', 'createdAt', 'updatedAt',
+]);
 
 /** HTTP 模块对外暴露的应用类型（场景/测试经 registry 取用） */
 export type HttpApp = Hono<Vars>;
@@ -45,15 +51,21 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
   const contentApi = new Hono<Vars>();
 
   // GET /api/v1/:type —— 列表（分页 + 过滤；默认只出 published）
+  // 自定义字段查询：?filter[price][gte]=100&filter[tags][contains]=hot（决策 #26）
   contentApi.get('/:type', async (c) => {
     const type = c.req.param('type');
     const q = c.req.query();
     const status = q['status'] ?? 'published';
+    const { filters, errors } = parseFilters(q, TOP_LEVEL_FIELDS);
+    if (errors.length > 0) {
+      return c.json({ error: { code: 'E_VALIDATION', message: errors.join('；') } }, 400);
+    }
     const page = await deps.content.find({
       type,
       tenantId: q['tenant'] ?? deps.tenantId,
       locale: q['locale'],
       status: status === 'all' ? undefined : status,
+      filters: filters.length > 0 ? filters : undefined,
       limit: q['limit'] ? Math.min(Number(q['limit']), 100) : 20,
       offset: q['offset'] ? Number(q['offset']) : 0,
     });

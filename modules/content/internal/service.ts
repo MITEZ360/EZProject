@@ -122,16 +122,18 @@ export function createContentService(driver: StorageDriver, events?: EventBus): 
 
       // 单事务内完成"取分页数据 + 计数"：total 与 items 保证同一一致性视图。
       // 计数用 tx.count（SQL COUNT），禁止全量取回再取 length。
+      // filters（决策 #26：自定义字段等值/范围/包含）find 与 count 必须同一套。
       return driver.transaction(async (tx) => {
         const [items, total] = await Promise.all([
           tx.find<EntryRow>({
             table: TABLE,
             where: { ...where, ...(query.filter ?? {}) },
+            filters: query.filters,
             orderBy: [{ field: 'createdAt', dir: 'desc' }],
             limit: query.limit ?? 20,
             offset: query.offset ?? 0,
           }),
-          tx.count({ table: TABLE, where }),
+          tx.count({ table: TABLE, where, filters: query.filters }),
         ]);
         return { items: items as unknown as Entity[], total };
       });

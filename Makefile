@@ -29,7 +29,7 @@ verify-full: verify ## 完整验证（里程碑/发版前）
 	npm run test:boot && npm run check:contract-snapshot && npm run test:e2e
 
 build: build-admin ## 产出可运行产物（自包含包：内联 TS；原生模块保持 external）
-	bun build ./scenarios/blog/main.ts --target=node --outfile dist/app.mjs \
+	bun build ./scenarios/generic-cms/main.ts --target=node --outfile dist/app.mjs \
 		--external better-sqlite3
 	@echo "→ dist/app.mjs（原生模块由 node_modules 提供；"自包含"见 make package）"
 
@@ -40,7 +40,7 @@ build-admin: ## 构建管理后台（React + Vite）→ dist/admin
 
 package: ## 产出压缩包（自包含交付：app + node_modules + admin + 说明）
 	@mkdir -p dist/pkg
-	bun build ./scenarios/blog/main.ts --target=node --outfile dist/pkg/app.mjs \
+	bun build ./scenarios/generic-cms/main.ts --target=node --outfile dist/pkg/app.mjs \
 		--external better-sqlite3
 	cp package.json dist/pkg/
 	cp -r node_modules dist/pkg/node_modules
