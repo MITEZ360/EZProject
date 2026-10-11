@@ -10,6 +10,7 @@ import { httpModule, type HttpModuleOptions } from '@modules/http/index.js';
 import { authzModule, type AuthzModuleOptions } from '@modules/authz/index.js';
 import { mediaModule, type MediaModuleOptions } from '@modules/media/index.js';
 import { cacheModule, type CacheModuleOptions } from '@modules/cache/index.js';
+import { searchModule } from '@modules/search/index.js';
 import { auditModule } from '@modules/audit/index.js';
 import { settingsModule } from '@modules/settings/index.js';
 
@@ -56,6 +57,7 @@ export async function createBlogApp(options: BlogOptions = {}): Promise<App> {
       authzModule(options.authz),
       contentModule(blogTypes),
       mediaModule(options.media), // 媒体资产（local 策略）
+      searchModule(), // 全文检索（SQLite FTS5；索引随内容事件增量更新）
       auditModule(), // 审计日志（通用管理）
       settingsModule(), // 系统设置（通用管理）
       ...(options.http ? [httpModule({ ...options.http, tenantId: options.tenantId })] : []),

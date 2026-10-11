@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Changed
+- **存储契约 v2.1**：`StorageTx.exec` 支持参数绑定；新增 `StorageTx.query<T>`（原生查询，边界限模块私有表与 QuerySpec 表达不了的方言特性，如 FTS5 `MATCH`）
 - **缓存/媒体模块术语归正**：策略选择字段由 `dialect` 改名 `provider`（"方言"专指数据库方言，避免混淆），并改为**策略表驱动**（与 storage factory 同构，模块内无 if/else）
 - **依赖分类修正**：`better-sqlite3` 归入 dependencies（运行时依赖）；移除未使用的 `drizzle-orm`；react/antd/dayjs 归入 devDependencies（构建期依赖）
 - **管理端归位**：`scenarios/blog/admin` → `scenarios/generic-cms/admin`（通用 CMS 管理端）；内容视图按类型定义动态渲染（零写死字段），App 壳零业务词汇；博客场景复用通用 admin、仅保留类型种子
@@ -33,6 +34,7 @@
 - **决策 #26 第二步落地**：`defineType` 落库（逻辑 Schema：类型定义是数据，更新不迁移旧数据）+ `listTypes`/`getType` 契约 + 类型管理 API（`POST/GET /api/manage/v1/types`）+ 跨重启持久化验证
 
 ### Added
+- **`modules/search`（全文检索，唯一空置契约落地）**：SQLite FTS5 策略（零新依赖）；**中文单字切分**（实测选定：默认分词器搜不到中文子串，单字切分索引仅增 51% 即全覆盖）；订阅内容事件做增量索引（事件总线 await → **强一致**）；启动时空索引自动全量构建；`GET /api/v1/search?q=&type=`（可见性同预览门：匿名只搜 published）
 - **内容预览门**：Content API 的非 published 读取（草稿 / `status=all`）必须带凭证；预览响应 `private, no-store` 且绕过共享缓存
 - **限流**（`modules/http`）：内存固定窗口策略（**有界**：maxKeys + 过期清扫 + 最旧淘汰），按 IP 作用于 `/api/v1/*`（默认 120/窗口）与登录端点（默认 10/窗口，防爆破）；429 + `Retry-After`；可 `enabled: false` 关闭
 - **CI 流水线**（`.github/workflows/ci.yml`）：`verify` 档（双 tsconfig 类型检查 + eslint + 内核词汇/方言分支扫描 + 契约快照 + 单测）与 `full` 档（加启动/交付测试 + 构建产物），兑现 design 第 10 章的"机器把关"承诺；契约快照从 verify-full 挪进日常 lint

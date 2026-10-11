@@ -591,3 +591,55 @@ engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/ed
 - [ ] 预览链接的短时 token（当前用登录凭证预览；分享式预览链接可后补）
 
 ---
+
+## 2026-10-11 · search 模块落地（分支 `feature/search-module`，唯一空置契约）
+
+**背景**：`kernel/contracts/search.contract.ts` 从阶段一就定好了，但 `modules/search` 一直不存在——
+这是唯一"契约在、实现不在"的缺口。CMS 没有搜索是硬伤。
+
+**关键决策：中文分词（探针实测后定，不靠猜）**
+
+FTS5 默认的 `unicode61` 分词器**对中文基本不可用**——中文没有空格，"整词"即整句。
+同一语料实测四方案（搜「你好世界，这是全文搜索测试」）：
+
+| 方案 | 整词 | 2 字子串 | 索引体积 |
+|---|---|---|---|
+| unicode61（默认原文） | ✅ | ❌ | 720 KB |
+| **单字切分** | ✅ | ✅ | **1088 KB（+51%）** |
+| 二元切分 | ✅ | ✅ | 1628 KB（+126%） |
+| trigram | ✅ | ❌（<3 字符） | — |
+
+**采用单字切分**：中文逐字成 token、英文/数字按词保留、标点作分隔；索引仅增 51% 即换取
+"任意中文子串可搜"。查询侧用 **phrase**（token 相邻）而非 AND——否则搜「世界」会命中
+「世…界」这类噪声。
+
+**契约扩展**（`core/storage-native-query` → kernel → main）：FTS5 的 `MATCH` 无法用 `QuerySpec`
+表达，且原 `exec` 不支持参数绑定（搜索词必须绑参防注入）。故：
+- `StorageTx.exec(sql, params?)` —— 支持参数绑定
+- `StorageTx.query<T>(sql, params?)` —— 原生查询，**边界写死**：仅限模块私有表，
+  且限于 `QuerySpec` 表达不了的方言特性
+
+**实现**：
+- `modules/search/internal/tokenize.ts` —— 切分（纯函数，索引与查询共用）
+- `modules/search/internal/sqlite-fts.ts` —— FTS5 策略（`search_index` 私有虚拟表；
+  `payload` 存文档快照避免 N+1；`bm25()` 排序取负使"分数越大越相关"）
+- `modules/search/index.ts` —— 模块入口：订阅 `content.entry.*` 事件做增量索引
+  （**事件总线 publish 会 await 订阅者 → 索引与内容写入强一致**）；
+  启动时索引为空则自动全量构建（`SEARCH_REINDEX=1` 强制重建）
+- HTTP：`GET /api/v1/search?q=&type=&limit=`——**注册在 `/:type` 之前**（否则 'search' 被当类型）；
+  可见性沿用预览门：匿名只搜 published，带凭证可搜草稿且 `no-store`
+
+**验证**：
+- 测试 **163**（新增 `search.test` 10 + `search-tokenize` 5）；lint / tsc / 三扫描全绿
+- 端到端冒烟 10/10：中文子串命中、PT 正文命中、英文命中、不存在词 0 条、
+  草稿匿名不可见 / 凭证可见、类型过滤、空查询 400、匿名 `status=all` 403
+
+**已知现象（记录，非缺陷）**：`kernel` 分支上残留阶段一的 `modules/{storage,content,cache}` 陈旧快照
+（kernel 分支定位是"内核真相"，不应含模块实现）。已确认合并安全：这些文件在 kernel 侧自上次同步后
+未变，三方合并取 main 版本，不会回退。将来若要彻底清理，需连同 main 一起处理，收益不大故暂缓。
+
+**遗留**：
+- [ ] 搜索的后台/前台 UI（服务端已就绪，纯 UI）
+- [ ] 检索增强：高亮片段、同义词、拼音（当前为子串短语匹配）
+
+---

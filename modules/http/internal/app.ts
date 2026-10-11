@@ -13,6 +13,7 @@ import type { IdentityService } from '@kernel/contracts/identity.contract.js';
 import type { AuthzService } from '@kernel/contracts/authz.contract.js';
 import type { AssetStore } from '@kernel/contracts/asset.contract.js';
 import type { CacheProvider } from '@kernel/contracts/cache.contract.js';
+import type { SearchProvider } from '@kernel/contracts/search.contract.js';
 import { newId } from '@kernel/primitives/id.js';
 import { mountAuthRoutes } from './auth-routes.js';
 import type { Principal } from '@kernel/primitives/principal.js';
@@ -154,6 +155,42 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     c.header('content-type', found.asset.contentType);
     c.header('cache-control', 'public, max-age=86400, immutable');
     return c.body(found.data as unknown as ArrayBuffer);
+  });
+
+  // GET /api/v1/search —— 全文检索（search 模块贡献；未加载 → 404）
+  // 注意：**必须注册在 /:type 之前**，否则 'search' 会被当成内容类型。
+  // 可见性同列表：匿名只搜 published；草稿需凭证（预览门）。
+  contentApi.get('/search', async (c) => {
+    const search = deps.registry.get<SearchProvider>('search');
+    if (!search) return notFound(c);
+    const q = c.req.query();
+    const text = q['q'] ?? '';
+    if (!text.trim()) {
+      return c.json({ error: { code: 'E_VALIDATION', message: '缺少查询词 q' } }, 400);
+    }
+
+    const statusParam = q['status'];
+    const wantsPreview = statusParam !== undefined && statusParam !== 'published';
+    const principal = wantsPreview ? await previewPrincipal(c) : null;
+    if (wantsPreview && !principal) {
+      return c.json(
+        { error: { code: 'E_FORBIDDEN', message: 'status 非 published 的查询需要凭证（预览）' } },
+        403
+      );
+    }
+
+    const result = await search.search({
+      index: q['type'] ?? '',
+      tenantId: q['tenant'] ?? deps.tenantId,
+      text,
+      // 匿名只搜已发布；预览（有凭证）不过滤状态
+      filter: principal ? undefined : { status: 'published' },
+      limit: q['limit'] ? Math.min(Number(q['limit']), 50) : 20,
+      offset: q['offset'] ? Number(q['offset']) : 0,
+    });
+
+    c.header('Cache-Control', principal ? 'private, no-store' : 'public, max-age=60');
+    return c.json({ items: result.hits, total: result.total });
   });
 
   // GET /api/v1/:type —— 列表（分页 + 过滤；默认只出 published）
