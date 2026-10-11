@@ -1,4 +1,9 @@
 {
+  "kernel/contracts/audit.contract.ts": [
+    "export interface AuditEntry {",
+    "export interface AuditQuery {",
+    "export interface AuditService {"
+  ],
   "kernel/contracts/authz.contract.ts": [
     "export interface AuthzAction {",
     "export interface AuthzDecision {",
@@ -20,6 +25,10 @@
     "export interface SearchHit<T = Record<string, unknown>> {",
     "export interface SearchResult<T = Record<string, unknown>> {",
     "export interface SearchProvider {"
+  ],
+  "kernel/contracts/settings.contract.ts": [
+    "export interface SettingItem {",
+    "export interface SettingsService {"
   ],
   "kernel/contracts/storage.contract.ts": [
     "export type Dialect = 'sqlite' | 'postgres' | 'mysql';",
