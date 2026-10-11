@@ -181,3 +181,36 @@
 **届时配套**（已写入 design 8.1）：`drivers/node/`+`drivers/bun/`+`shared/` 目录规划、CI 扫描窄豁免、bun:sqlite 动态加载隔离、同一契约测试×两驱动、`package-node`/`package-bun` 双打包线。
 
 ---
+## 2026-10-11 · HTTP 层落地（分支 `module/http-api`）
+
+**目标**：阶段一收尾——Content API + Management API（设计文档 2.4 的双层 API），内核零改动。
+
+**做了什么**：
+- **`modules/http`**（新模块，`dependsOn: ['content']`，经注册表按契约取 ContentService）：
+  - **Content API**（`/api/v1/*`）：只读、匿名、`Cache-Control: public, max-age=60`（可进 CDN）；
+    默认只出 `published`，`?status=all` 供预览类消费方；列表分页 + 按 slug/id 取单篇。
+  - **Management API**（`/api/manage/v1/*`）：POST/PUT/DELETE，守卫中间件解析主体（401 拒绝）。
+  - **鉴权守卫做成策略**（`RequestGuard`）：默认 `bearerTokenGuard`（MANAGE_TOKEN）；
+    authz 模块落地后由场景注入新守卫，HTTP 模块不改——策略模式第三处落地。
+  - **错误映射**：服务层 `E_*` 错误码 → HTTP 状态码（400/404/409），方言/内部细节不外漏。
+- **博客场景**：`createBlogApp` 支持 `http` 配置；`main.ts` 经 `@hono/node-server` 起服务
+  （Node 兼容运行时），`--selfcheck` 参数支持装配自检后退出（交付测试用）。
+- **依赖**：新增 `hono` + `@hono/node-server`（模块层允许依赖 HTTP 框架；内核仍零依赖）。
+
+**遇到的问题 / 解决**：
+- **问题**：交付测试 `node app.mjs` 超时——main.ts 起服务后常驻不退出。
+  → **解决**：入口支持 `--selfcheck`（自检即退），交付测试改用；常驻模式才是真实运行形态。
+
+**验证结果（机器判定）**：
+- 全套测试 **58/58**（新增 HTTP 11 个：Content 只读/缓存头/404/预览、Management 401/201/PUT/DELETE/铁律 400/非法 JSON、可拔插×2）。
+- `make verify-full` 全绿（含交付测试）。
+- **真实冒烟（Node 起 dist/app.mjs + curl）8/8**：健康检查、401、创建、匿名读、slug 读、缓存头、HTML 拒绝 400、draft 不可见。
+- 内核零改动（无契约快照变化）；边界扫描全过。
+
+**遗留 / 下一步**：
+- [x] 合并 `module/http-api` → `main`
+- [ ] React 后台（列表 + 编辑，消费 Management API）
+- [ ] authz 模块（RBAC，替换 Bearer Token 守卫）
+- [ ] 字段裁剪 / API 版本化 / 限流（阶段二）
+
+---

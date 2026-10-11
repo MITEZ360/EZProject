@@ -9,18 +9,19 @@
 
 ## [Unreleased]
 
+（空）
+
+## [0.2.0] - 2026-10-11 · HTTP 层（Content API + Management API）
+
 ### Added
-- 文档体系：`README.md`、`docs/dev-log.md`、`CHANGELOG.md`、`docs/vibe-cookbook.md`
-- 设计文档 `docs/design.md`（v4）
-- 工程规范 `docs/engineering-spec.md`（v3）
-- **ID 策略定稿**：租户短 id（8 字符 base62，不可变）+ 其他实体 UUIDv7 + 租户表 id↔name 映射
-- **时间格式定稿**：统一 epoch 毫秒整数
-- **软删除定稿**：`deleted_at` 哨兵值法（活跃=0）+ `UNIQUE(tenant_id, slug, deleted_at)`
-- **术语"策略表"**：在三处文档定义并互链（design 5.2 / engineering-spec 5.3 / cookbook P1.1）
-- **项目定位红线**：单二进制为"部署方便"而非"极致省空间"；**方便直观 > 极致抠体积**（design 第0/4.4/8.1 章 + cookbook P3.2）
-- **交付理念**：目标为**自包含**（目标机器零环境依赖）；**单二进制只是首选实现，压缩包/容器同样可选**（design 8.1 + README）
-- **分支策略**：新增 `docs/git-workflow.md`——`kernel`/`main` 双长期分支、前缀式短分支命名、内核额外把关、`kernel → main` 定期同步
-- **决策 #25（规划）**：运行时作为策略表第二维度——SQLite 驱动按运行时分两份实现（Node=better-sqlite3 / Bun=bun:sqlite），打包按目标自动集成，Bun 侧解锁真单二进制；排期 HTTP 层之后（design 8.1 + dev-log）
+- **`modules/http`**：可插拔 HTTP 模块（`dependsOn: ['content']`）
+  - Content API `/api/v1/*`：只读、匿名、`Cache-Control: public`（CDN 可缓存）、默认只出 published、分页 + slug/id 取单篇
+  - Management API `/api/manage/v1/*`：POST/PUT/DELETE + 守卫中间件（401）
+  - **鉴权守卫策略**（`RequestGuard`）：默认 Bearer Token（`MANAGE_TOKEN`），authz 模块落地后可插拔替换
+  - 错误码 → HTTP 状态码映射（400/404/409），内部细节不外漏
+- **博客场景**：接入 `@hono/node-server` 真实 HTTP 服务（Node 兼容）；`--selfcheck` 自检即退模式
+- **依赖**：`hono`、`@hono/node-server`
+- README：HTTP API 快速开始示例
 
 ### Fixed
 - **存储层健壮性**（`core/fix-storage-robustness`，探针实测确认后修复）：
@@ -30,6 +31,15 @@
   - 驱动错误收敛为 `StorageError(E_CONFLICT/E_STORAGE)`，`SqliteError` 码不外漏
   - JSON 列**显式声明**解析，废除"像 JSON 就 parse"启发式（防正文静默损坏）
   - `:memory:` 跳过无效的 WAL 配置
+
+- **决策 #25（规划）**：运行时作为策略表第二维度（SQLite 驱动按运行时分两份实现，Bun 侧解锁真单二进制；排期后续）
+
+### Changed
+- 交付测试改用 `node app.mjs --selfcheck`（服务现为常驻模式，自检模式用于装配验证）
+
+### Verified
+- 全套测试 58/58；真实冒烟（Node + curl）8/8；内核零改动
+
 
 ## [0.1.0] - 2026-10-11 · 内核骨架跑通
 
