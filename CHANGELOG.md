@@ -11,6 +11,19 @@
 
 （空）
 
+## [0.3.0] - 2026-10-11 · React 管理后台
+
+### Added
+- **`scenarios/blog/admin`**：React 19 + Ant Design 6 + Vite 管理后台
+  - Token 登录门（MANAGE_TOKEN）、文章列表（Table）、新建/编辑（Form + Markdown 输入）
+  - Markdown → Portable Text 写入归一（`markdownToPt`）+ 编辑回填（`ptToMarkdown`）——**铁律不破：入库永远是 PT 结构**
+- **`modules/http` `staticDir` 选项**：Hono 托管后台静态资源 + SPA 兜底；`/api/*` 未匹配路径回 404 JSON（回归测试锁定）
+- **Makefile**：`build-admin` 目标；`package` 自包含包携带后台（解压即得 API + 后台）
+- **双 tsconfig**：根（后端）/ `tsconfig.admin.json`（JSX+DOM）
+
+### Verified
+- 全套测试 65/65；端到端冒烟：后台页面/静态资源/SPA 兜底/API 404 边界全过
+
 ## [0.2.0] - 2026-10-11 · HTTP 层（Content API + Management API）
 
 ### Added

@@ -163,6 +163,20 @@ describe('HTTP 模块可拔插（宪法一）', () => {
     expect(app2.loadedModules()).toEqual(['storage', 'content', 'http']);
     await app2.stop();
   });
+
+  it('静态托管开启时：未匹配的 API 路径回 404 JSON，不被 SPA 兜底吞掉', async () => {
+    const app3 = await createBlogApp({
+      dialect: 'sqlite',
+      url: ':memory:',
+      tenantId: 'tenant01',
+      http: { guard: allowAllGuard(), tenantId: 'tenant01', staticDir: 'no-such-static-dir' },
+    });
+    const api3 = app3.registry.require<HttpApp>(HttpTokens.App);
+    const res = await api3.request('/api/unknown');
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('E_NOT_FOUND');
+    await app3.stop();
+  });
 });
 
 async function bootstrapModulesOrder(): Promise<App> {
