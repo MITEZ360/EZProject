@@ -19,6 +19,7 @@
 - **术语"策略表"**：在三处文档定义并互链（design 5.2 / engineering-spec 5.3 / cookbook P1.1）
 - **项目定位红线**：单二进制为"部署方便"而非"极致省空间"；**方便直观 > 极致抠体积**（design 第0/4.4/8.1 章 + cookbook P3.2）
 - **交付理念**：目标为**自包含**（目标机器零环境依赖）；**单二进制只是首选实现，压缩包/容器同样可选**（design 8.1 + README）
+- **分支策略**：新增 `docs/git-workflow.md`——`kernel`/`main` 双长期分支、前缀式短分支命名、内核额外把关、`kernel → main` 定期同步
 
 ### Changed
 - 富文本格式表述：由"兼容 Portable Text"改为**"严格遵循 Portable Text 规范"**

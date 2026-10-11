@@ -69,12 +69,14 @@ tar -xzf dist/headless-cms-<ver>.tar.gz && ./headless-cms
 |------|------|
 | [docs/design.md](./docs/design.md) | **设计文档**：架构、选型、内容层、数据模型、路线 |
 | [docs/engineering-spec.md](./docs/engineering-spec.md) | **工程规范**：四条宪法、目录结构、契约代码、CI 检查 |
+| [docs/git-workflow.md](./docs/git-workflow.md) | **分支策略**：kernel/main 双长期分支、命名规范、内核把关 |
 | [docs/vibe-cookbook.md](./docs/vibe-cookbook.md) | **AI 协作开发经验**：踩坑记录、有效/无效的提示 |
 | [docs/dev-log.md](./docs/dev-log.md) | **开发记录**：按时间记录做了什么、为什么 |
 | [CHANGELOG.md](./CHANGELOG.md) | **变更日志**：按版本记录对外变更 |
 
 ## 贡献约定
 
+- **分支策略**：见 [docs/git-workflow.md](./docs/git-workflow.md)。内核走 `kernel` 分支，产品走 `main`，功能走前缀式短分支。
 - 提交前必须通过 CI 全部检查（见工程规范第 9 章）。
 - 违反"四条宪法"的代码一律不合并。
 - 开发过程中的坑，请记录到 [docs/vibe-cookbook.md](./docs/vibe-cookbook.md)。
