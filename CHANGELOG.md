@@ -20,6 +20,7 @@
 - **项目定位红线**：单二进制为"部署方便"而非"极致省空间"；**方便直观 > 极致抠体积**（design 第0/4.4/8.1 章 + cookbook P3.2）
 - **交付理念**：目标为**自包含**（目标机器零环境依赖）；**单二进制只是首选实现，压缩包/容器同样可选**（design 8.1 + README）
 - **分支策略**：新增 `docs/git-workflow.md`——`kernel`/`main` 双长期分支、前缀式短分支命名、内核额外把关、`kernel → main` 定期同步
+- **决策 #25（规划）**：运行时作为策略表第二维度——SQLite 驱动按运行时分两份实现（Node=better-sqlite3 / Bun=bun:sqlite），打包按目标自动集成，Bun 侧解锁真单二进制；排期 HTTP 层之后（design 8.1 + dev-log）
 
 ### Fixed
 - **存储层健壮性**（`core/fix-storage-robustness`，探针实测确认后修复）：

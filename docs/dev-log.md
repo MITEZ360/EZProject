@@ -166,3 +166,18 @@
 - [ ] Content API / Management API（HTTP 层，Hono）+ React 后台
 
 ---
+## 2026-10-11 · 决策 #25：运行时作为策略表第二维度（规划，排期 HTTP 层后）
+
+**背景**：讨论"Bun 集成 SQLite 的问题"时提出——对无法自动兼容的场景（better-sqlite3 原生模块在 Bun 下不可加载），可否用平台相关组件（`bun:sqlite`）并在打包时按目标自动集成。
+
+**决策**：**方向采纳，排期 HTTP 层之后**。
+
+| # | 决策 | 结论 | 理由 |
+|---|------|------|------|
+| 25 | 运行时维度策略化 | SQLite 驱动按运行时分两份（Node=better-sqlite3 / Bun=bun:sqlite），工厂按目标运行时选择，打包时自动集成 | 契约对运行时无知，架构零阻力；Bun 侧解锁 `bun --compile` 真单二进制（bun:sqlite 内置、零原生模块），比 Node 压缩包更彻底地达成"自包含" |
+
+**不现在做的原因**：当前压缩包交付已满足"零环境依赖"，Bun 单二进制是优化不是缺口；HTTP 层会确定真实部署形态，届时再决定是否维护 Bun 交付线。
+
+**届时配套**（已写入 design 8.1）：`drivers/node/`+`drivers/bun/`+`shared/` 目录规划、CI 扫描窄豁免、bun:sqlite 动态加载隔离、同一契约测试×两驱动、`package-node`/`package-bun` 双打包线。
+
+---

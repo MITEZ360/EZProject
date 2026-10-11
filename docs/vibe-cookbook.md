@@ -330,6 +330,10 @@ if (dialect === 'sqlite') { ... } else if (dialect === 'postgres') { ... }
 **验收**：`make verify` 在 Node 下全绿；`make verify-full` 的交付测试在隔离目录 `node app.mjs` 能起。
 
 > **呼应 P3.2**：这正是"自包含 ≠ 必须单文件"的现实理由——单二进制在原生模块前不可行，压缩包才是对的形态。
+>
+> **后续演进（决策 #25，见 design 8.1）**：SQLite 驱动按**运行时**分两份实现
+> （Node=better-sqlite3 / Bun=bun:sqlite），把"运行时"变成策略表第二个维度；
+> Bun 侧即可解锁 `bun --compile` 真单二进制。排期在 HTTP 层落地之后。
 
 ### P3.4 存储驱动三坑：事务重入 / JSON 启发式 / 方言错误码泄漏 ⭐踩过的坑（探针实测）
 
