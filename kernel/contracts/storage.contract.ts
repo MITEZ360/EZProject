@@ -12,11 +12,21 @@ export type Dialect = 'sqlite' | 'postgres' | 'mysql';
 
 export interface QuerySpec {
   table: string;
-  /** 方言无关条件 */
+  /** 等值条件（快捷方式） */
   where?: Record<string, unknown>;
+  /** 组合过滤（与 where 求 AND）。字段支持点路径访问 JSON 字段：'data.price'（决策 #26 查询效率策略） */
+  filters?: QueryFilter[];
   orderBy?: { field: string; dir: 'asc' | 'desc' }[];
   limit?: number;
   offset?: number;
+}
+
+/** 条件过滤：op 语义由契约定义，方言各自落地（SQLite 用 json_extract，PG 用 ->>） */
+export interface QueryFilter {
+  /** 列名（顶层物理列）或点路径（JSON 字段，如 'data.price'） */
+  field: string;
+  op: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'contains';
+  value: unknown;
 }
 
 export interface StorageTx {
@@ -24,6 +34,9 @@ export interface StorageTx {
   findOne<T>(spec: QuerySpec): Promise<T | null>;
   /** 满足条件的行数（不取回数据；分页统计必须用它，禁止 find 后取 length） */
   count(spec: QuerySpec): Promise<number>;
+  /** 执行原生语句。仅限模块创建/维护**私有表**（如 audit/settings 的 DDL）；
+   *  共享业务数据一律走 find/insert/update/delete——禁止用 exec 绕过数据抽象。 */
+  exec(sql: string): Promise<void>;
   insert<T>(table: string, data: T): Promise<T>;
   update<T>(table: string, id: string, patch: Partial<T>): Promise<T>;
   delete(table: string, id: string): Promise<void>;
