@@ -822,10 +822,52 @@ SQLite 的 `INTEGER` 是 64 位动态类型，故这些缺陷**在 SQLite 侧永
 - SQLite 侧 95 单测 + 84 boot 通过；lint / tsc / 三扫描（内核词汇、方言分支、契约快照）全绿
 
 **遗留**：
-- [ ] **模块私有表硬编码物理类型**（本轮暴露的架构问题，最小修复未治本）：
-  模块 DDL 里直接写 `BIGINT`/`TEXT` 只是"三方言恰好通用"的巧合，不是设计保证。
-  正解是由存储层翻译逻辑类型——契约加 `PortableColumnType` + `driver.ddlType()`，
-  或更进一步提供 `createTable` 原语让存储层生成 DDL。属**内核契约变更**，需走 `core/` 分支。
+- [x] **模块私有表硬编码物理类型** —— 已于下一节治本（内核契约 v2.2 声明式建表）
 - [ ] mysql 驱动（方言已声明，实现待补）
+
+---
+
+## 2026-10-11 · 模块私有表治本：声明式建表（`core/private-table-ddl` + `feature/private-table-ddl`）
+
+**缘起**：上一轮（PG 全文检索）暴露的系统性缺陷——模块私有表硬编码 SQLite 的物理类型，
+6 处 / 5 张表在 PG 上写入全部失败。当时取最小修复（`BIGINT`）并明确记录"治本需内核契约变更"。本轮治本。
+
+**关键决策**：
+
+| # | 决策 | 选择 | 理由 |
+|---|---|---|---|
+| 30 | 模块私有表的 DDL 归属 | **声明式建表**：契约加 `createTable(TableDef)`，DDL 由存储层按方言生成 | 物理类型与方言语法属存储层职责；留在模块里就必然漂移（已实测发生） |
+| 31 | `bool` 在 PG 的落地 | 原生 `BOOLEAN`（不是 0/1 整数） | 契约 6.5 本意如此；原 `pgCodec` 把 boolean 转 0/1，等于用 codec 迁就了错误的列类型 |
+
+**内核为什么必须改（把关必答：不改行不行）**：不行。缺陷根因是"模块手写物理类型"，
+而这属于存储层职责。只要契约不提供声明式建表，每个模块就必须自己知道
+SQLite 的 `INTEGER` 是 64 位动态类型、PG 的 `integer` 只有 32 位——这个知识分散到
+N 个模块必然漂移。代价已经实测发生：5 张表在 PG 上完全不可用，且 **SQLite 侧的测试永远发现不了**。
+
+**变更**：
+- **契约 v2.2**：`PortableColumnType`（text/int/json/timestamp/bool）、`ColumnDef`、`IndexDef`、
+  `TableDef`，以及 `StorageDriver.createTable(TableDef)`（幂等；同时登记表结构）
+- 新增方言无关的 **DDL 生成器** `modules/storage/schema/ddl.ts`：列名走 ident 白名单、
+  默认值只收字面量（拒绝 SQL 片段）、物理类型由驱动注入——方言差异只剩这一个注入点
+- **6 张私有表改声明式**：`audit_logs`、`auth_users`、`auth_roles`、`auth_refresh_tokens`、`assets`、`settings`
+- `columns.ts`：`Dialect` 改为复用契约定义（原先两处各自声明）；json 列 PG 侧改 `TEXT`
+  （与驱动内置表 `entries.data` 及值编解码路径一致）
+
+**顺带纠正两处既有不一致**：
+1. `columns.ts` 说 `bool` → PG `BOOLEAN`，而 `pgCodec` 把 boolean 转 0/1 —— 驱动在用 codec
+   迁就错误的列类型。现按契约本意：PG 落原生 `BOOLEAN`，codec 不再转换（SQLite 侧仍转 0/1，那边没有 boolean 类型）。
+   于是 authz 里那段"落库转 0/1"的补丁随之删除。
+2. `columns.ts` 这套「逻辑类型 × 方言」策略表**此前只有测试在用**，从未接入生产路径——
+   本轮起它成为建表物理类型的**唯一来源**。
+
+**验证**：
+- 单测 **104**（新增 `ddl.test.ts` 8 个：列/主键/NOT NULL/字面量默认值与转义/复合主键/索引与降序/幂等/注入防护）
+- SQLite boot 84 通过；PG 67 全绿；e2e 2 通过
+- **PG 侧表结构实测**：`auth_roles.builtin` = `boolean`；6 处时间戳与尺寸列全部 `bigint`
+  （治本前是 `integer`，这正是当初溢出报错的根源）
+- lint / tsc / 三扫描全绿；契约快照已随内核变更更新
+
+**流程**：契约变更走 `core/private-table-ddl` → `kernel` → 反向同步 `main`；
+实现走 `feature/private-table-ddl` → `main`。内核目录零违规改动。
 
 ---

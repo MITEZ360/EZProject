@@ -13,7 +13,7 @@ import { newId } from '@kernel/primitives/id.js';
 import { Tokens } from '@kernel/registry.js';
 import { randomBytes } from 'node:crypto';
 import { hashPassword, newRefreshToken, sha256, signJwt, verifyJwt, verifyPassword } from './internal/crypto.js';
-import { migrateAuthz, registerAuthzTables, store, type RoleRow, type UserRow } from './internal/store.js';
+import { migrateAuthz, store, type RoleRow, type UserRow } from './internal/store.js';
 
 export interface AuthzModuleOptions {
   /** JWT 签名密钥；生产必须显式配置（缺省时启动随机生成，仅限开发） */
@@ -244,7 +244,6 @@ export function authzModule(options: AuthzModuleOptions = {}): PlatformModule {
       accessTtl = options.accessTtlSeconds ?? DEFAULT_ACCESS_TTL;
       refreshTtl = options.refreshTtlSeconds ?? DEFAULT_REFRESH_TTL;
 
-      registerAuthzTables(driver);
       await migrateAuthz(driver);
 
       registry.provide<IdentityService>(Tokens.Identity, identity);

@@ -18,10 +18,12 @@
 - **管理端归位**：`scenarios/blog/admin` → `scenarios/generic-cms/admin`（通用 CMS 管理端）；内容视图按类型定义动态渲染（零写死字段），App 壳零业务词汇；博客场景复用通用 admin、仅保留类型种子
 - **PG 全文检索策略落地**（`modules/search/internal/postgres-fts.ts`）：PG **内置** tsvector + GIN + ts_rank（零扩展依赖，不用 pg_trgm）；`<->` 与 FTS5 phrase 语义经探针实测对齐（相邻命中 / 不相邻不命中 / 逆序不命中），故 search 契约测试参数化跑两方言
 - **search 切分层重构**：`tokenize.ts` 只负责切分（导出 `tokenizeList`），查询语法（`"a b"` / `a <-> b`）下沉到各自策略；新增方言无关共享层 `modules/search/internal/document.ts`（索引内容 / 可过滤列白名单 / payload 读回）
+- **存储契约 v2.2：声明式建表**（`StorageDriver.createTable(TableDef)`）——模块私有表**不再手写 DDL**，物理类型由存储层按方言落地。新增 `PortableColumnType` / `ColumnDef` / `IndexDef` / `TableDef`；新增方言无关的 DDL 生成器（列名走白名单、默认值只收字面量）。`columns.ts` 的「逻辑类型 × 方言」策略表**首次接入生产路径**，成为建表物理类型的唯一来源
+- **6 张模块私有表改声明式**：`audit_logs`、`auth_users`、`auth_roles`、`auth_refresh_tokens`、`assets`、`settings`；`bool` 列在 PG 落原生 `BOOLEAN`（原 codec 把 boolean 转 0/1，等于迁就了错误的列类型），JSON 列 PG 侧统一 `TEXT`（与驱动内置表一致）
 
 ### Fixed
-- **模块私有表在 PG 上因物理类型溢出而完全不可用**（6 处 / 5 张表）：`INTEGER` 在 SQLite 是 64 位动态类型、在 PG 只有 32 位，epoch 毫秒直接溢出 → `audit` / `authz`（用户、角色、刷新令牌）/ `media` / `settings` 的写入全部失败。时间戳与尺寸列改为 `BIGINT`（三方言通用，SQLite 下亲和性相同）
-- **`auth_roles.builtin` 在 PG 上被拒**：JS `boolean` 直接赋给整数列，PG 强类型报错（SQLite 会静默转 0/1）。改为在 store 的落库边界转 0/1，调用方保持 boolean 语义
+- **模块私有表在 PG 上因物理类型溢出而完全不可用**（6 处 / 5 张表）：`INTEGER` 在 SQLite 是 64 位动态类型、在 PG 只有 32 位，epoch 毫秒直接溢出 → `audit` / `authz`（用户、角色、刷新令牌）/ `media` / `settings` 的写入全部失败。**根因（模块手写物理类型）已由声明式建表从机制上消除**
+- **`auth_roles.builtin` 在 PG 上被拒**：JS `boolean` 赋给整数列，PG 强类型报错（SQLite 会静默转 0/1）。现该列声明为 `bool`，PG 落原生 `BOOLEAN`，落库侧不再需要 0/1 转换
 - **超长 token 在 PG 上的静默错误**：>2046 字节的 token 被 PG 静默忽略，且落在短语中间会改变距离（`b <-> 超长 <-> c` 退化为 `b <2> c`）——查询语义被悄悄改变却仍"成功"。改为在切分层统一丢弃（`MAX_TOKEN_BYTES`），保证两方言行为一致
 
 ### Added

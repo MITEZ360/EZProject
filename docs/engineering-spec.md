@@ -577,11 +577,21 @@ db.run(sql`PRAGMA foreign_keys = ON;`);
 | 项 | 约定 |
 |----|------|
 | 主键 | 应用层生成：**租户用短 id（8 字符 base62）**，**其他实体用 UUIDv7**（`kernel/primitives/id.ts` 统一封装） |
-| 时间 | **统一 epoch 毫秒整数**（`integer`/`bigint`）；对外 API 可序列化为 ISO 8601 |
+| 时间 | **统一 epoch 毫秒整数**；物理类型由存储层按方言落地（SQLite `INTEGER` / PG·MySQL `BIGINT`）；对外 API 可序列化为 ISO 8601 |
 | 软删除 | `deleted_at` **哨兵值法**：活跃=`0`，删除=真实毫秒；`UNIQUE(tenant_id, slug, deleted_at)` |
-| JSON | Drizzle `mode:'json'` |
-| 布尔 | Drizzle `boolean()` |
-| UPSERT | Drizzle `.onConflictDoUpdate()` |
+| JSON | 逻辑类型 `json`；PG 侧落 `TEXT`（与驱动内置表一致，值编解码统一为 stringify/parse） |
+| 布尔 | 逻辑类型 `bool`；SQLite 落 `INTEGER`(0/1)，**PG 落原生 `BOOLEAN`** |
+| UPSERT | 主键/唯一约束可用时走 `ON CONFLICT DO UPDATE`；无唯一约束的表（如 FTS5 虚拟表）先删后插 |
+
+**模块私有表的落地方式（决策 #30）**：一律用**声明式建表**
+`StorageDriver.createTable(TableDef)` —— 模块只声明逻辑类型（`text` / `int` / `json` /
+`timestamp` / `bool`）、可空性、默认值与索引，物理类型与方言语法由存储层生成。
+
+**禁止在模块里手写 `BIGINT` / `INTEGER` / `TEXT` 这类物理类型**：实测这样做会让私有表
+在某个方言上静默失效——5 张表曾在 PG 上因 `INTEGER` 装不下 epoch 毫秒而完全不可用，
+而 **SQLite 侧的测试永远发现不了**（动态类型，`INTEGER` 是 64 位）。
+无法声明式表达的表（SQLite FTS5 虚拟表、PG tsvector 表）走 `StorageTx.exec` 原生通道——
+逃生舱保留，但不再是默认路径。
 
 ---
 

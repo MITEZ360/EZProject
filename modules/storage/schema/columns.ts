@@ -6,11 +6,13 @@
 // 这样存储契约保持 ORM 无关；将来若引入 Drizzle，只需在此把 ColumnSpec 映射到
 // drizzle 的列构造器（见文件末尾 sqliteDrizzleColumns），改动集中一处。
 
+import type { Dialect } from '@kernel/contracts/storage.contract.js';
+
 /** 逻辑类型（内核语义层） */
 export type LogicalType = 'uuid' | 'shortId' | 'text' | 'int' | 'json' | 'timestamp' | 'bool';
 
-/** 方言 */
-export type Dialect = 'sqlite' | 'postgres' | 'mysql';
+/** 方言：复用存储契约的定义（避免两处声明各自漂移） */
+export type { Dialect };
 
 /** 物理列描述（方言无关的中间表示） */
 export interface ColumnSpec {
@@ -67,7 +69,10 @@ export const strategies: Record<LogicalType, Record<Dialect, ColumnFn>> = {
   },
   json: {
     sqlite: (n) => spec(n, 'sqlite', 'json', 'TEXT', true),
-    postgres: (n) => spec(n, 'postgres', 'json', 'JSONB', true),
+    // PG 侧用 TEXT 而非 JSONB：与驱动内置表（entries.data 等）以及 SQLite 侧保持同一
+    // 逻辑类型，值编解码统一为"写入 stringify / 读出 parse"一条路径。
+    // 需要 JSON 原生操作时，查询侧统一写 `(col::jsonb->>...)`——对两种列都成立（见 postgres.driver）。
+    postgres: (n) => spec(n, 'postgres', 'json', 'TEXT', true),
     mysql: (n) => spec(n, 'mysql', 'json', 'JSON', true),
   },
   timestamp: {

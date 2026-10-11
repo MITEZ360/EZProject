@@ -19,6 +19,7 @@ import type {
   QuerySpec,
   StorageDriver,
   StorageTx,
+  TableDef,
   TableSchema,
 } from '@kernel/contracts/storage.contract.js';
 import {
@@ -29,6 +30,8 @@ import {
   toPhysicalRow,
   type ValueCodec,
 } from '../schema/tables.js';
+import { buildCreateTable } from '../schema/ddl.js';
+import { column } from '../schema/columns.js';
 
 export { StorageError };
 
@@ -84,12 +87,12 @@ CREATE TABLE IF NOT EXISTS content_types (
  * - bigint 的连接级解析在连接配置里处理（见 types.bigint）
  */
 const pgCodec: ValueCodec = {
-  encode: (v, isJson) => {
-    if (isJson) return JSON.stringify(v);
-    return typeof v === 'boolean' ? (v ? 1 : 0) : v;
-  },
+  // 布尔**原样传递**：PG 有原生 BOOLEAN，契约 6.5 的约定就是该列落 BOOLEAN。
+  // （SQLite 无 boolean 类型，那边仍转 0/1——方言差异在各自 codec 里吸收，
+  //   这正是 ValueCodec 存在的意义。）
+  encode: (v, isJson) => (isJson ? JSON.stringify(v) : v),
   decode: (v, isJson) => {
-    // postgres.js 对 jsonb 列已自动解析；此处兜底 TEXT 存储的场景
+    // JSON 列：TEXT 存储时需解析（postgres.js 对 jsonb 列会自动解析，此处兜底）
     if (isJson && typeof v === 'string') return JSON.parse(v);
     return v;
   },
@@ -245,6 +248,18 @@ export function createPostgresDriver(config: PostgresConfig): StorageDriver {
     },
   });
 
+  /**
+   * 声明式建表：DDL 由 buildCreateTable 按「逻辑类型 → PG 物理类型」生成。
+   * 建表与索引在同一事务内（PG 的 DDL 支持事务，失败不留半成品）。
+   */
+  const applyCreateTable = async (def: TableDef): Promise<void> => {
+    if (def.schema) registry.registerTable(def.table, def.schema);
+    const stmts = buildCreateTable(def, (t) => column(t, 'col', 'postgres').physical);
+    await sql.begin(async (tx) => {
+      for (const stmt of stmts) await run(tx as PgTx, stmt);
+    });
+  };
+
   return {
     dialect: 'postgres',
 
@@ -255,6 +270,8 @@ export function createPostgresDriver(config: PostgresConfig): StorageDriver {
     registerTable(name: string, schema: TableSchema): void {
       registry.registerTable(name, schema);
     },
+
+    createTable: applyCreateTable,
 
     async transaction<T>(fn: (tx: StorageTx) => Promise<T>): Promise<T> {
       const outer = txContext.getStore();
