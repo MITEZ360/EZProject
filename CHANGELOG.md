@@ -21,6 +21,15 @@
 - **交付理念**：目标为**自包含**（目标机器零环境依赖）；**单二进制只是首选实现，压缩包/容器同样可选**（design 8.1 + README）
 - **分支策略**：新增 `docs/git-workflow.md`——`kernel`/`main` 双长期分支、前缀式短分支命名、内核额外把关、`kernel → main` 定期同步
 
+### Fixed
+- **存储层健壮性**（`core/fix-storage-robustness`，探针实测确认后修复）：
+  - 事务**可重入**：嵌套 `transaction()` 加入当前事务（SAVEPOINT），不再报 `within a transaction`（契约 v1.1 语义）
+  - `find` 计数改 `tx.count()` 且与分页数据**同一事务视图**（原：两次事务 + 全量取回取 length）
+  - content service 方法去除 `this` 依赖（解构/传回调安全）
+  - 驱动错误收敛为 `StorageError(E_CONFLICT/E_STORAGE)`，`SqliteError` 码不外漏
+  - JSON 列**显式声明**解析，废除"像 JSON 就 parse"启发式（防正文静默损坏）
+  - `:memory:` 跳过无效的 WAL 配置
+
 ## [0.1.0] - 2026-10-11 · 内核骨架跑通
 
 ### Added

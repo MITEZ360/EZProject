@@ -133,3 +133,36 @@
 - [ ] 真实 PG/MySQL 驱动（阶段三）
 
 ---
+
+## 2026-10-11 · 存储层健壮性修复（分支 `core/fix-storage-robustness`）
+
+**背景**：对首版 SQLite 集成做审查，用探针脚本实测确认了 3 个高危问题 + 若干隐患。结论：**能跑，但属于"契约语义没想清楚就写实现"，不应出现**。
+
+**实测确认的问题**（探针证据）：
+1. **事务不可重入**：`BEGIN` 包异步回调的写法，嵌套 `transaction()` 直接报 `cannot start a transaction within a transaction`——模块化组合的必然场景，目前没炸只是因为只有一个模块。
+2. **find 计数非原子且全量取回**：`total` 用第二次事务 `find` 全量取回取 `length`，与 `items` 不同视图；5000 行实测 4.4ms + 390KB（`COUNT(*)` 仅 0.3ms）。
+3. **`this` 依赖**：`update`/`remove` 用 `this.findOne`，方法被解构即失效。
+4. 隐患：`fromRow` JSON 启发式可静默损坏正文；`:memory:` 下 WAL 配置无效（假配置）；方言错误码裸泄漏。
+
+**关键决策**：
+
+| # | 决策 | 结论 | 理由 |
+|---|------|------|------|
+| 22 | 事务重入语义 | **进契约**：`transaction()` 可重入（SAVEPOINT 实现），最外层决定提交 | 这是跨方言契约语义，不是实现细节；不定死则每个驱动各发明一套 |
+| 23 | JSON 列解析 | **废除启发式**，驱动内 `TABLE_SCHEMAS.jsonColumns` 显式声明；声明列解析失败即炸 | 启发式会静默改变正文数据；显式声明才符合"方便直观、可控"的项目定位 |
+| 24 | 驱动错误边界 | 驱动层收敛为 `StorageError(E_CONFLICT/E_STORAGE)`，方言错误码进 `details` | 宪法一：上层不应知道 SQLite；PG/MySQL 接入时错误语义已就位 |
+
+**改动清单**：
+- `kernel/contracts/storage.contract.ts`：文件头事务语义四条 + `StorageTx.count()`（契约快照已更新）
+- `modules/storage/drivers/sqlite.driver.ts`：事务深度计数 + SAVEPOINT 重入；`StorageError` 收敛；类型化 `toRow`/`fromRow`；`:memory:` 跳过 WAL；`count` 实现；未声明表结构直接报错
+- `modules/content/internal/service.ts`：`find` 单事务内 find+count；`svc` 闭包自引用替代 `this`
+- 测试：新增 6 个单测（重入×3 / 错误收敛 / count / 表结构声明）+ 2 个启动回归（解构安全 / total 同视图）
+
+**验证结果（机器判定）**：
+- `make verify`：34 个单测全绿；启动测试 11 个全绿；契约快照 / 内核词汇 / 方言分支三扫描通过。
+
+**遗留 / 下一步**：
+- [ ] 合并 `core/fix-storage-robustness` → `kernel` → 反向同步 `main`
+- [ ] Content API / Management API（HTTP 层，Hono）+ React 后台
+
+---
