@@ -6,25 +6,33 @@
 // 注：PG 测试需串行（多文件并行会争抢同一个库的建表/清表），Makefile 的 test-pg 已固化该参数。
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { bootstrap, type App } from '@kernel/bootstrap.js';
 import { Tokens } from '@kernel/registry.js';
 import { storageModule } from '@modules/storage/index.js';
 import { contentModule } from '@modules/content/index.js';
 import { authzModule } from '@modules/authz/index.js';
 import { settingsModule } from '@modules/settings/index.js';
+import { mediaModule } from '@modules/media/index.js';
+import { httpModule, HttpTokens, type HttpApp } from '@modules/http/index.js';
 import { createStorageDriver } from '@modules/storage/factory.js';
 import { blogTypes } from '@scenarios/blog/index.js';
 import type { ContentService } from '@kernel/contracts/content.contract.js';
 import type { StorageDriver } from '@kernel/contracts/storage.contract.js';
+import type { AssetStore } from '@kernel/contracts/asset.contract.js';
+import type { SettingsService } from '@kernel/contracts/settings.contract.js';
 import type { EntityTypeDef } from '@kernel/primitives/entity.js';
 import { systemPrincipal } from '@kernel/primitives/principal.js';
 
 const PG = process.env['TEST_PG_URL'];
 const TENANT = 'tenant01';
 const actor = systemPrincipal(TENANT);
+const BOOTSTRAP_TOKEN = 'pg-bootstrap-token';
 
 const DROP =
-  'DROP TABLE IF EXISTS entries, content_types, auth_users, auth_roles, auth_refresh_tokens, settings, assets, audit_logs CASCADE';
+  'DROP TABLE IF EXISTS search_index, entries, content_types, auth_users, auth_roles, auth_refresh_tokens, settings, assets, audit_logs CASCADE';
 
 const PT = (text: string): unknown[] => [
   { _type: 'block', _key: 'k1', style: 'normal', children: [{ _type: 'span', _key: 's1', text }], markDefs: [] },
@@ -41,9 +49,11 @@ const products: EntityTypeDef = {
 
 describe.skipIf(!PG)('PostgreSQL 端到端（换配置可切库）', () => {
   let app: App;
+  let mediaRoot: string;
   const content = (): ContentService => app.registry.require<ContentService>(Tokens.Content);
 
   beforeAll(async () => {
+    mediaRoot = mkdtempSync(join(tmpdir(), 'cms-pg-media-'));
     const clean = createStorageDriver({ dialect: 'postgres', url: PG as string });
     await clean.transaction((tx) => tx.exec(DROP));
     await clean.close();
@@ -54,6 +64,8 @@ describe.skipIf(!PG)('PostgreSQL 端到端（换配置可切库）', () => {
         contentModule(blogTypes),
         authzModule({ jwtSecret: 'test-secret' }),
         settingsModule(),
+        mediaModule({ root: mediaRoot }),
+        httpModule({ tenantId: TENANT, manageToken: BOOTSTRAP_TOKEN }),
       ],
       config: { tenantId: TENANT },
     });
@@ -61,6 +73,7 @@ describe.skipIf(!PG)('PostgreSQL 端到端（换配置可切库）', () => {
 
   afterAll(async () => {
     await app?.stop();
+    if (mediaRoot) rmSync(mediaRoot, { recursive: true, force: true });
   });
 
   it('装配成功：方言为 postgres，内建类型已种子落库', async () => {
@@ -182,5 +195,75 @@ describe.skipIf(!PG)('PostgreSQL 端到端（换配置可切库）', () => {
       tx.query<{ id: string }>('SELECT id FROM content_types WHERE id LIKE $1 ORDER BY id', ['pg-nested-%'])
     );
     expect(rows.map((r) => r.id)).toEqual(['pg-nested-1']); // 外层提交，内层回滚
+  });
+
+  // ---------- 模块私有表：PG 下真实读写 ----------
+  // 这几张表曾是"硬编码 SQLite 物理类型"的重灾区：
+  //   INTEGER 在 SQLite 是 64 位（动态类型），在 PG 只有 32 位 → epoch 毫秒溢出；
+  //   布尔列直接把 JS boolean 交给整数列，PG 强类型会拒绝。
+  // 这些缺陷**只在 PG 上暴露**——SQLite 侧的测试永远发现不了，故必须在此显式覆盖。
+
+  it('authz 全链路：引导 → 登录 → 刷新（BIGINT 时间戳 / 布尔 0/1 落库）', async () => {
+    const api = app.registry.require<HttpApp>(HttpTokens.App);
+    const json = { 'content-type': 'application/json' };
+
+    // 建管理员：写 auth_users(created_at/updated_at BIGINT) + auth_roles(builtin 0/1)
+    const b = await api.request('/api/manage/v1/auth/bootstrap', {
+      method: 'POST',
+      headers: { ...json, authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+      body: JSON.stringify({ email: 'pg-admin@example.com', password: 'secret-password', name: '管理员' }),
+    });
+    expect(b.status).toBe(201);
+
+    // 登录：读回角色 builtin（PG 返回 0/1 数字，须能正确转回 boolean）
+    const l = await api.request('/api/manage/v1/auth/login', {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ email: 'pg-admin@example.com', password: 'secret-password' }),
+    });
+    expect(l.status).toBe(200);
+    const pair = (await l.json()) as { accessToken: string; refreshToken: string };
+    expect(pair.accessToken.split('.')).toHaveLength(3);
+
+    // 刷新：写 auth_refresh_tokens(expires_at/revoked_at/created_at BIGINT)
+    const r = await api.request('/api/manage/v1/auth/refresh', {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ refreshToken: pair.refreshToken }),
+    });
+    expect(r.status).toBe(200);
+    const rotated = (await r.json()) as { refreshToken: string };
+    expect(rotated.refreshToken).not.toBe(pair.refreshToken); // 轮换
+  });
+
+  it('settings：PG 上读写（updated_at BIGINT）', async () => {
+    const settings = app.registry.require<SettingsService>(Tokens.Settings);
+    await settings.set(TENANT, 'pg.title', 'PG 站点');
+    await settings.set(TENANT, 'pg.list', ['a', 'b']);
+
+    expect((await settings.get(TENANT, 'pg.title'))?.value).toBe('PG 站点');
+    expect((await settings.get(TENANT, 'pg.list'))?.value).toEqual(['a', 'b']);
+    // 读回的 updatedAt 必须是完整 epoch 毫秒（截断成 32 位会得到 1970 年附近的数）
+    expect((await settings.get(TENANT, 'pg.title'))?.updatedAt).toBeGreaterThan(1_600_000_000_000);
+  });
+
+  it('media：PG 上登记资产（size / created_at BIGINT）', async () => {
+    const assets = app.registry.require<AssetStore>(Tokens.Assets);
+    const data = new Uint8Array([1, 2, 3, 4, 5]);
+
+    await assets.put({
+      id: 'pg-asset-1',
+      tenantId: TENANT,
+      filename: 'a.bin',
+      contentType: 'application/octet-stream',
+      data,
+    });
+
+    const meta = await assets.getMeta('pg-asset-1', TENANT);
+    expect(meta?.size).toBe(5);
+    expect(meta?.createdAt).toBeGreaterThan(1_600_000_000_000);
+
+    const got = await assets.read('pg-asset-1', TENANT);
+    expect(Array.from(got!.data)).toEqual([1, 2, 3, 4, 5]);
   });
 });

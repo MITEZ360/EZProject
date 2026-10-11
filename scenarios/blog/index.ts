@@ -58,7 +58,7 @@ export async function createBlogApp(options: BlogOptions = {}): Promise<App> {
       authzModule(options.authz),
       contentModule(blogTypes),
       mediaModule(options.media), // 媒体资产（local 策略）
-      searchModule(), // 全文检索（SQLite FTS5；索引随内容事件增量更新）
+      searchModule(), // 全文检索（按方言选策略：SQLite=FTS5 / PG=tsvector；索引随内容事件增量更新）
       auditModule(), // 审计日志（通用管理）
       settingsModule(), // 系统设置（通用管理）
       webhookModule(), // 内容事件外部通知（目标：WEBHOOK_URL 或租户设置 webhook.url）

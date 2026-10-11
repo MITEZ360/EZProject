@@ -8,13 +8,14 @@ import type { SettingItem, SettingsService } from '@kernel/contracts/settings.co
 import { newId } from '@kernel/primitives/id.js';
 import { Tokens } from '@kernel/registry.js';
 
+// updated_at 用 BIGINT：epoch 毫秒超出 PG 的 INTEGER(32 位) 范围（SQLite 下等价）。
 const DDL = `
 CREATE TABLE IF NOT EXISTS settings (
   id         TEXT PRIMARY KEY,
   tenant_id  TEXT NOT NULL,
   key        TEXT NOT NULL,
   value      TEXT NOT NULL,        -- JSON
-  updated_at INTEGER NOT NULL      -- epoch ms
+  updated_at BIGINT NOT NULL       -- epoch ms
 );
 CREATE INDEX IF NOT EXISTS ix_settings_tenant ON settings (tenant_id, key);
 `;

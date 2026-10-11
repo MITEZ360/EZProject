@@ -49,11 +49,12 @@ jobs:
         run: make verify
 
   postgres:
-    name: PG 驱动验证（真库跑存储契约测试）
+    name: PG 验证（真库跑跨方言契约测试）
     needs: verify
     runs-on: ubuntu-latest
     # 起一个真实 PG，让同一套契约测试跑在第二个方言上——
-    # 这是"换配置可切库"承诺的持续验证（JSON 查询的方言差异正是在这里暴露的）。
+    # 这是"换配置可切库"承诺的持续验证：JSON 查询的字典序陷阱、
+    # 模块私有表的 INTEGER 溢出、全文检索的短语语义对齐，都是在这里暴露的。
     services:
       postgres:
         image: postgres:16-alpine

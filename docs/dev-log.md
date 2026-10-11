@@ -744,7 +744,88 @@ FTS5 默认的 `unicode61` 分词器**对中文基本不可用**——中文没�
 - SQLite 侧 **171 通过 / 5 跳过**（PG 用例在未设 `TEST_PG_URL` 时跳过）；lint / tsc / 三扫描全绿
 
 **遗留**：
-- [ ] PG 的**全文检索策略**（tsvector/tsquery）——search 目前在 PG 上降级为不可用
+- [x] PG 的**全文检索策略**（tsvector/tsquery）—— 已于下一节完成
+- [ ] mysql 驱动（方言已声明，实现待补）
+
+---
+
+## 2026-10-11 · PG 全文检索策略（分支 `feature/pg-search`）
+
+**缘起**：上一轮的遗留项——search 在 PG 上**降级不可用**（FTS5 是 SQLite 专有）。
+本轮补上 tsvector/tsquery 策略，并把 search 的契约测试也参数化到两方言。
+
+**关键决策**：
+
+| # | 决策 | 选择 | 理由 |
+|---|---|---|---|
+| 27 | PG 全文检索实现 | PG **内置** tsvector/tsquery（不用 pg_trgm） | 零扩展依赖（pg_trgm 需 `CREATE EXTENSION`，与"依赖少"的硬约束冲突）；且 `<->` 与 FTS5 phrase 语义经探针实测对齐，契约测试得以参数化 |
+| 28 | 超长 token 处理 | 切分层**统一丢弃**（`MAX_TOKEN_BYTES = 2046`） | PG 会**静默**忽略超长词并改变短语距离（`b <-> 超长 <-> c` 退化为 `b <2> c`）——静默错误比报错危险；统一丢弃保证两方言行为一致 |
+| 29 | 模块私有表的物理类型 | 最小修复取 `BIGINT`；**治本待 `core/` 分支** | 阻塞性缺陷（PG 上 authz/audit/media/settings 全不可用）先解；治本需内核契约变更（逻辑类型翻译），按内核纪律单独走 |
+
+**方案**：不用 pg_trgm（需 `CREATE EXTENSION`，与"依赖少"的硬约束冲突），
+用 PG **内置**的 tsvector + GIN + ts_rank（零扩展依赖），并**复用同一套应用层切分**：
+索引侧 `to_tsvector('simple', 单字切分后的文本)`，查询侧 `to_tsquery('simple', '世 <-> 界')`。
+`simple` 配置不做词干化/停用词，中文必须用它。
+
+**探针先行的五个发现**：
+
+1. **短语语义天然对齐（最关键的好消息）**：FTS5 的 phrase `"世 界"` 与 tsquery 的
+   `世 <-> 界` 语义**完全一致**——实测：相邻命中 ✅ / 不相邻不命中 ✅ / 逆序不命中 ✅。
+   这是契约测试能参数化的前提（同一套断言跑两方言）。
+2. **超长 token 是静默错误，不是报错**：>2046 字节的 token 被 PG **静默忽略**（仅 NOTICE）。
+   危险的是它落在短语中间会让距离失真：`b <-> 超长 <-> c` 退化成 `'b' <2> 'c'`——
+   查询语义被悄悄改变、却仍返回"成功"。故在切分层统一丢弃（`MAX_TOKEN_BYTES = 2046`）。
+3. **tsvector 的 1MB 上限不是实际障碍**：2 万字文章单字切分后仅 229 KB
+   （lexeme 去重 + 位置合并双重抑制）。原先担心的"单字切分撑爆 tsvector"不成立。
+4. **位置截断会产生假阳性**：PG 的 `MAXSTRPOS = 16383`，超长文档尾部的位置被压到 16383。
+   实测构造出的误命中：`世`(16382) 与 `界`(20000) 相隔 3600 个 token，却被判定相邻
+   （对照：短文档中同样间隔正确返回不命中）。仅影响超长文档（>1.6 万汉字）尾部的多字短语，
+   且是**多召回**而非漏召回 → 判定为可接受，明确记录为已知限制。
+5. **中文反而绕开了 token 长度限制**：单字切分后每个 token 只有 3 字节，永不触限；
+   只有超长连续字母数字串（长 base64、无分隔 URL）受限，这类串检索价值极低。
+
+**发现并修复的系统性缺陷（只在 PG 暴露）**：
+模块私有表**全部硬编码了 SQLite 的物理类型**——6 处、5 张表：
+
+| 表 / 列 | 问题 | 后果 |
+|---|---|---|
+| `audit_logs.occurred_at` | `INTEGER` | 审计写入失败（epoch 毫秒溢出 32 位） |
+| `auth_users.created_at` / `updated_at` | `INTEGER` | 建用户失败 → **authz 在 PG 上完全不可用** |
+| `auth_roles.created_at` / `updated_at` / `builtin` | `INTEGER` | 同上；且 `builtin` 把 JS `boolean` 直接交给整数列，PG 强类型**拒绝** |
+| `auth_refresh_tokens.expires_at` / `revoked_at` / `created_at` | `INTEGER` | 刷新令牌写入失败 |
+| `assets.size` / `created_at` | `INTEGER` | 资产登记失败 |
+| `settings.updated_at` | `INTEGER` | 设置写入失败 |
+
+SQLite 的 `INTEGER` 是 64 位动态类型，故这些缺陷**在 SQLite 侧永远不暴露**；
+而 `postgres-e2e` 此前不含 audit/media/http 模块、也没走到登录路径，因此漏网。
+
+**修复**：时间戳/尺寸列一律 `BIGINT`（三方言通用；SQLite 下 BIGINT 与 INTEGER 亲和性相同）；
+`builtin` 保持 `INTEGER` 存 0/1，**转换收敛在 store 的落库边界**（调用方仍用 boolean 语义）。
+
+**架构动作**：
+- 切分层只做切分（`tokenize.ts` 导出 `tokenizeList`），查询语法下沉到各策略：
+  `sqlite-fts.ts` 的 `toMatchExpr` 拼 `"a b"`，`postgres-fts.ts` 的 `toTsQuery` 拼 `a <-> b`。
+- 抽出方言无关共享层 `modules/search/internal/document.ts`：索引内容（`searchableText`）、
+  可过滤列白名单（`FILTERABLE`）、payload 读回（`parsePayload`）——两方言必须一致的部分。
+- DDL 由策略提供（`ddl: string[]`，整体一个事务执行）；PG 侧新增表 + GIN 索引 + scope 索引。
+- `hasAnyIndex` 改用 `SELECT 1 ... LIMIT 1`，避开 PG 的 `count(*)` 返回 bigint（驱动给字符串）陷阱。
+- PG 侧 `count(*)::int` 显式 cast；两方言都加次级排序 `doc_id`（同分顺序确定，防分页抖动）。
+- `make test-pg` 纳入 `search.test.ts`；CI 的 postgres job 随之覆盖。
+
+**验证**：
+- PG 上 **67 个测试全绿**（搜索 23、存储契约 13×2、JSON 过滤 5×2、端到端 8）
+- 新增跨方言断言：**短语语义**（相邻命中 / 不相邻不命中 / 逆序不命中）、
+  **upsert 幂等**（FTS5 的"先删后插"与 PG 的 `ON CONFLICT` 必须收敛为一行）
+- 新增 PG 端到端覆盖：authz 全链路（引导 → 登录 → 刷新）、settings 读写、media 存取
+- **反证验证**：临时把 settings 的 `BIGINT` 改回 `INTEGER`，测试**精确失败**于
+  `out of range for type integer`，改回后通过——证明测试真能捕捉该缺陷（不是"假绿"）
+- SQLite 侧 95 单测 + 84 boot 通过；lint / tsc / 三扫描（内核词汇、方言分支、契约快照）全绿
+
+**遗留**：
+- [ ] **模块私有表硬编码物理类型**（本轮暴露的架构问题，最小修复未治本）：
+  模块 DDL 里直接写 `BIGINT`/`TEXT` 只是"三方言恰好通用"的巧合，不是设计保证。
+  正解是由存储层翻译逻辑类型——契约加 `PortableColumnType` + `driver.ddlType()`，
+  或更进一步提供 `createTable` 原语让存储层生成 DDL。属**内核契约变更**，需走 `core/` 分支。
 - [ ] mysql 驱动（方言已声明，实现待补）
 
 ---

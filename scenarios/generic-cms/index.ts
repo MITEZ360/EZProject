@@ -43,7 +43,7 @@ export async function createGenericCmsApp(options: GenericCmsOptions = {}): Prom
       authzModule(options.authz),
       contentModule(), // 无内建类型：通用 CMS 的类型全部运行时定义
       mediaModule(options.media), // 媒体资产（local 策略）
-      searchModule(), // 全文检索（SQLite FTS5；索引随内容事件增量更新）
+      searchModule(), // 全文检索（按方言选策略：SQLite=FTS5 / PG=tsvector；索引随内容事件增量更新）
       ...(withAdmin
         ? [auditModule(), settingsModule(), webhookModule()] // webhook 依赖 settings
         : []),
