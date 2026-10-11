@@ -517,3 +517,36 @@ engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/ed
 - [ ] Redis 策略（阶段三 / 多服务器场景）
 
 ---
+
+## 2026-10-11 · 接入 CI + 依赖卫生（分支 `chore/ci-pipeline`）
+
+**背景**：design 第 10 章列了 5 类风险（抽象泄漏 / 模块耦合 / 内核污染 / Bun 独有 API / 内容铁律），
+规避方式全写着"CI 扫描"——4 个 `scripts/check-*.mjs` 也早就写好了，但**仓库里没有任何 CI 配置**，
+只能靠人记得手动 `make verify`。本轮补上，兑现"机器把关"。
+
+**做了什么**：
+- **`.github/workflows/ci.yml`**，两档（呼应 cookbook 测试分层）：
+  - `verify`（每次 push/PR）：双 tsconfig 类型检查 + eslint + 内核词汇 + 方言分支 + **契约快照** + 单测
+  - `full`（needs verify）：加启动测试、交付测试（压缩包隔离运行）、构建产物 + artifact 上传
+  - 运行时一律 Node（better-sqlite3 原生模块），Bun 仅用于安装与构建；含原生模块自检步骤
+- **Makefile**：`typecheck` 覆盖双 tsconfig（原来只查后端，admin 漏检）；
+  **契约快照挪进 `lint`**（原来只在 verify-full，日常不查——内核把关不该等到里程碑）；verify-full 去重
+- **依赖卫生**：
+  - `better-sqlite3`：devDependencies → **dependencies**（运行时依赖；原位置在 `npm ci --omit=dev` 场景会崩）
+  - 移除 **dead dependency `drizzle-orm`**（代码从未引用，只在注释里提到过）
+  - react/antd/dayjs/@ant-design/icons → devDependencies（构建期依赖，经 Vite 打进 dist/admin）
+
+**CI 一接上就抓出的历史违规**（证明"靠人工跑会漏"）：
+1. **术语污染**：`modules/cache`、`modules/media` 用 `dialect` 命名各自的策略选择——
+   但"方言"在本项目专指**数据库方言**（`storage.Dialect`）。已改名 `provider`，
+   并借机改为**策略表驱动**（与 `storage/factory.ts` 同构），消灭了模块内的 if/else 分支。
+2. **扫描器有洞**：`check-no-dialect.mjs` 只匹配 `dialect ===`，**漏了 `!==`**——
+   `modules/media` 的 `dialect !== 'local'` 因此长期逃过检测。已补齐 `!==` / `!=`。
+
+**验证**：`make verify-full` 全绿（81 单测 + 启动测试 + 交付测试/压缩包隔离运行）；YAML 解析通过。
+
+**遗留**：
+- [ ] 契约层 `AssetDialect` 同样属术语污染（改走 `core/` 分支）
+- [ ] CI 未接自动发布（tag → release artifact）——需要时再加
+
+---

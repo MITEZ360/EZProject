@@ -14,11 +14,11 @@ help:
 install: ## 安装依赖
 	bun install
 
-typecheck: ## 类型检查
-	npm run typecheck
+typecheck: ## 类型检查（后端 + 管理后台，双 tsconfig）
+	npm run typecheck && npm run typecheck:admin
 
-lint: ## 静态检查（含边界规则、内核词汇扫描、方言分支扫描）
-	npm run lint && npm run check:kernel-vocab && npm run check:no-dialect
+lint: ## 静态检查（eslint 边界规则 + 内核词汇 + 方言分支 + 契约快照）
+	npm run lint && npm run check:kernel-vocab && npm run check:no-dialect && npm run check:contract-snapshot
 
 test: ## 单元测试（快）
 	npm run test:unit
@@ -26,7 +26,7 @@ test: ## 单元测试（快）
 verify: typecheck lint test ## 日常验证（提交前跑这个）
 
 verify-full: verify ## 完整验证（里程碑/发版前）
-	npm run test:boot && npm run check:contract-snapshot && npm run test:e2e
+	npm run test:boot && npm run test:e2e
 
 build: build-admin ## 产出可运行产物（自包含包：内联 TS；原生模块保持 external）
 	bun build ./scenarios/generic-cms/main.ts --target=node --outfile dist/app.mjs \

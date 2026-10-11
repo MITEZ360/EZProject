@@ -10,6 +10,8 @@
 ## [Unreleased]
 
 ### Changed
+- **缓存/媒体模块术语归正**：策略选择字段由 `dialect` 改名 `provider`（"方言"专指数据库方言，避免混淆），并改为**策略表驱动**（与 storage factory 同构，模块内无 if/else）
+- **依赖分类修正**：`better-sqlite3` 归入 dependencies（运行时依赖）；移除未使用的 `drizzle-orm`；react/antd/dayjs 归入 devDependencies（构建期依赖）
 - **管理端归位**：`scenarios/blog/admin` → `scenarios/generic-cms/admin`（通用 CMS 管理端）；内容视图按类型定义动态渲染（零写死字段），App 壳零业务词汇；博客场景复用通用 admin、仅保留类型种子
 
 ### Added
@@ -30,7 +32,11 @@
 - **决策 #26 第三步落地**：后台"类型管理"视图——类型列表/新建/编辑（字段动态增删 + 11 种调色板下拉），消费 `/api/manage/v1/types`；类型定义复用内核原语
 - **决策 #26 第二步落地**：`defineType` 落库（逻辑 Schema：类型定义是数据，更新不迁移旧数据）+ `listTypes`/`getType` 契约 + 类型管理 API（`POST/GET /api/manage/v1/types`）+ 跨重启持久化验证
 
+### Added
+- **CI 流水线**（`.github/workflows/ci.yml`）：`verify` 档（双 tsconfig 类型检查 + eslint + 内核词汇/方言分支扫描 + 契约快照 + 单测）与 `full` 档（加启动/交付测试 + 构建产物），兑现 design 第 10 章的"机器把关"承诺；契约快照从 verify-full 挪进日常 lint
+
 ### Fixed
+- **方言扫描器漏检**：`check-no-dialect.mjs` 只匹配 `dialect ===`，漏掉 `!==`（`modules/media` 的 `dialect !== 'local'` 长期逃检）→ 已补齐
 - **内存缓存改有界 LRU**：原无上限 `Map` 可被外部撑爆（缓存 key 含完整 query string，`?offset=N` 等可产生无限 key）→ 条数上限（默认 1000）+ 近似字节上限（默认 8 MiB）+ LRU 淘汰；命中保鲜、覆盖写不重复计容、纯 LRU 覆盖过期回收（无热路径全表扫）
 - **驱动布尔落库**：按契约 6.5 转 INTEGER（原直接绑定布尔报错）
 - **UUIDv7 同毫秒单调递增**：原实现同毫秒尾部随机导致按 id 排序不稳定（审计 tie-break 偶发失败）；改为 48位时间戳+12位同毫秒序号+62位随机

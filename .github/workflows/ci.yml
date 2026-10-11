@@ -1,0 +1,82 @@
+# CI 流水线
+#
+# 兑现 docs/design.md 第 10 章承诺的「机器把关」：把文档里列的 5 类风险
+# （抽象泄漏 / 模块耦合 / 内核污染 / Bun 独有 API / 内容铁律）连同类型检查与
+# 测试全部接进流水线，不再依赖人工记得跑 `make verify`。
+#
+# 分档（呼应 cookbook 的测试分层：日常只跑快的）：
+#   verify —— 日常档：双 tsconfig 类型检查 + eslint + 边界扫描 + 契约快照 + 单测
+#   full   —— 里程碑档：加启动测试、交付测试（压缩包隔离运行）、构建产物
+#
+# 运行时说明：验证与运行链一律走 Node（better-sqlite3 是原生模块，Bun 下不可用），
+# Bun 仅用于依赖安装与打包加速。详见 docs/dev-log.md 与 cookbook P3.3。
+
+name: CI
+
+on:
+  push:
+    branches: [main, kernel]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支的旧流水线失效即取消，省额度
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: 日常验证（类型 / 边界扫描 / 单测）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node（验证与运行链）
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 安装 Bun（依赖安装与打包）
+        uses: oven-sh/setup-bun@v2
+
+      - name: 安装依赖
+        run: bun install --frozen-lockfile
+
+      - name: 原生模块自检（确认 Node 能加载 better-sqlite3）
+        run: node -e "require('better-sqlite3'); console.log('better-sqlite3 OK')"
+
+      - name: 日常验证（make verify）
+        run: make verify
+
+  full:
+    name: 完整验证（启动 / 交付 / 构建）
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node（验证与运行链）
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 安装 Bun（依赖安装与打包）
+        uses: oven-sh/setup-bun@v2
+
+      - name: 安装依赖
+        run: bun install --frozen-lockfile
+
+      - name: 完整验证（含启动测试与交付测试）
+        run: make verify-full
+
+      - name: 构建产物（通用 CMS + 博客场景 + 管理后台）
+        run: |
+          make build
+          make build-blog
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
