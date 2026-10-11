@@ -299,6 +299,17 @@ DB_DIALECT=mysql    DB_URL=mysql://...    ./app # 切 MySQL
 
 ### 5.2 Schema 组织：一份逻辑定义 + 策略表适配
 
+> **术语：什么是"策略表"**
+> 本文档所说的**"策略表"**，指**用一张二维查找表（逻辑类型 × 数据库方言）代替 if/else 堆叠**的写法。
+> 它是**策略模式的轻量版**——不写 class，用对象字面量当策略容器（`strategies[type][dialect]()`）。
+> **作用**：消除"同一字段在各数据库下写法不同"的分支判断，让**列定义只在实体层写一次**，加类型/加数据库只改一处。
+>
+> 反例（禁止）：
+> ```ts
+> if (type === 'uuid') { if (dialect === 'sqlite') return text(...); if (dialect === 'postgres') return uuid(...); }
+> ```
+> 参见 cookbook P1.1「禁止 if/else 代替策略模式」。
+
 ```ts
 // modules/storage/schema/columns.ts —— 列定义写一次，方言适配交给策略表
 const strategies: Record<LogicalType, ColumnStrategy> = {

@@ -201,6 +201,17 @@ if (dialect === 'sqlite') { ... } else if (dialect === 'postgres') { ... }
 
 **验收**：`grep -rn "dialect ===" src/` 应只在工厂里出现（已入 CI）。
 
+> **补充：策略表 = 策略模式的轻量版**
+> 当分支不是"选谁"而是"同语义字段在各方言怎么写"（二维：逻辑类型 × 方言），用**二维查找表**代替 if/else：
+> ```ts
+> // ✅ 策略表：加类型/加方言只改一处
+> const strategies: Record<LogicalType, Record<Dialect, () => ColumnBuilder>> = {
+>   uuid: { sqlite: () => text('id'), postgres: () => uuid('id'), mysql: () => char('id', { length: 36 }) },
+> };
+> const column = (t: LogicalType, name: string, d: Dialect) => strategies[t][d]()(name);
+> ```
+> 不写 class，用对象字面量当策略容器。详见 design.md 5.2 与 engineering-spec 5.3。
+
 ### P1.2 禁止跨模块直接 import 实现 ⭐高频
 
 **现象**：计费模块要感知"内容发布"，AI 写出 `import { contentService } from '../content'`。
