@@ -15,7 +15,7 @@
         │  kernel（长期分支）—— 内核唯一演进线          │
         │  只装 kernel/ 目录；改动需额外把关              │
         └───────────────┬─────────────────────────────┘
-                        │ ① 内核演进：feature → kernel
+                        │ ① 内核演进：core/* → kernel
                         │ ② 定期反向同步：kernel → main
                         ▼
         ┌─────────────────────────────────────────────┐
@@ -56,13 +56,14 @@
 | `fix/` | 修 bug | `main`（或对应发布 tag） | `main` | `fix/entry-publish-race` |
 | `docs/` | 纯文档 | `main` | `main` | `docs/git-workflow` |
 | `chore/` | 构建/CI/依赖等杂项 | `main` | `main` | `chore/ci-bun-cache` |
-| `kernel/` | **内核演进**（特殊） | `kernel` | `kernel` | `kernel/event-bus-v2` |
+| `core/` | **内核演进**（特殊） | `kernel` | `kernel` | `core/event-bus-v2` |
 
 > **命名公式**：`<前缀>/<kebab-case-短描述>`。描述要能一眼看出"这条线在做什么"。
 > 避免 `feature/update`、`fix/bug` 这类无信息命名。
 >
-> **注意**：长期分支叫 `kernel`（无斜杠），而内核短分支叫 `kernel/xxx`（有斜杠）。
-> 两者不冲突——短分支挂在长期分支下，正好体现"内核演进是 `kernel` 的内部线"。
+> **注意**：内核短分支前缀用 **`core/`**（如 `core/event-bus-v2`），**不用 `kernel/`**。
+> 原因：长期分支本身就叫 `kernel`，Git 不允许同时存在 `kernel` 分支与 `kernel/xxx` 分支（ref 文件与目录冲突）。
+> 同理，目录名 `kernel/` 是代码目录，与分支名无关，不受影响。
 
 **分支生命周期**：**短**。切出 → 开发 → PR → 合并 → **删除**。长期只保留 `kernel` 与 `main` 两条。
 
@@ -73,7 +74,7 @@
 内核改动**唯一合法路径**：
 
 ```
-kernel ──① 切出──▶ kernel/<描述> ──② 开发──▶ PR（额外把关）──③ 合回──▶ kernel
+kernel ──① 切出──▶ core/<描述> ──② 开发──▶ PR（额外把关）──③ 合回──▶ kernel
                                                                         │
                                                     ④ 定期反向同步 ▼
                                                                       main
@@ -115,7 +116,7 @@ kernel ──▶ main
 ### 4.3 main → kernel（禁止反向灌业务）
 
 **禁止**把 `main` 上的业务代码合并进 `kernel`。
-内核**只接受** `kernel/*` 分支的演进——否则业务就会渗进内核。
+内核**只接受** `core/*` 分支的演进——否则业务就会渗进内核。
 
 > **一句话**：`kernel → main` 是允许且定期的；`main → kernel` 是**禁止**的。
 
@@ -211,10 +212,10 @@ git push -u origin module/content-pt
 
 # 场景二：演进内核（特殊，从 kernel 切）
 git checkout kernel && git pull
-git checkout -b kernel/event-bus-v2
+git checkout -b core/event-bus-v2
 # ... 只改 kernel/ 目录 ...
 git commit -m "refactor(kernel): 事件总线支持通配订阅"
-git push -u origin kernel/event-bus-v2
+git push -u origin core/event-bus-v2
 # → 开 PR 合回 kernel（过内核把关）
 
 # 场景三：内核反向同步到 main（定期）
