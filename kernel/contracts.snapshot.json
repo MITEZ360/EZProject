@@ -28,7 +28,7 @@
     "export interface StorageDriver {"
   ],
   "kernel/primitives/entity.ts": [
-    "export type FieldType = | 'text' | 'number' | 'boolean' | 'richText' | 'media' | 'relation' | 'select' | 'json';",
+    "export type FieldType = | 'text' | 'longText' | 'number' | 'boolean' | 'date' | 'select' | 'richText' | 'component' | 'relation' | 'media' | 'json';",
     "export interface FieldDef {",
     "export interface EntityTypeDef {",
     "export interface Entity {"
