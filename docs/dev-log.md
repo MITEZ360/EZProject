@@ -918,3 +918,63 @@ relation 要手输目标 UUID、component 要贴 JSON 文本、media 要手输�
       对"解压即用"的定位而言，驱动自动建父目录更合适（待定）
 
 ---
+## 清尾巴收官：版本历史 / 定时发布 / 运维交付 / 前端测试
+
+**版本历史与定时发布**（#27 #28，提交 62512f2）
+
+新增内核契约 `RevisionService`（list/get/rollback）与
+`ScheduleService`（schedule/cancel/get/list），配套 `modules/revision`
+与 `modules/scheduler`，两组管理 API 接入 http 模块。
+
+设计取舍：
+- 版本存**完整 `data` 快照**而非增量 diff —— 回滚无歧义，代价是存储。
+  版本历史的用处恰恰在"出事后要立刻回到某个确定状态"，diff 回放会引入
+  一类"理论上等价、实际上算错"的 bug。
+- 定时发布只做**计划管理**，到期执行靠轮询 —— 不引入额外常驻进程，
+  多实例部署天然不会重复发布。
+
+**顺带修复：`update` 只合并 `data`，顶层 `slug`/`status` 永远改不动。**
+`ContentService.update` 此前把输入全塞进 `data`，顶层保留列既不更新、
+`data` 里还多出同名字段，与 `create` 行为不一致 —— 表现为"改完 slug
+但 URL 不变"。改为提取保留键、更新顶层列并从 `data` 删除。
+
+**运维交付**（#29，提交 6f6407f）
+
+- `scripts/restore.mjs`：`--list` / `--inspect` / `--dry-run` 三种只读模式
+  先看再动；恢复前自动留底 `pre-restore-<ts>.db`；恢复后逐表比对行数
+- `scripts/backup-rotate.mjs`：GFS 保留（小时 24 / 天 14 / 周 8 / 月 12），
+  最新一份永不删除；按时间桶占槽而非"距今 N 天"（备份断档时不误删）
+- `scripts/backup-cron.mjs`：备份 + 轮转绑成原子步骤
+- `.github/workflows/release.yml`：tag → 校验版本一致 → verify-full →
+  package → 隔离解压自检 → 附 sha256 创建 Release
+- `docs/operations.md` / `docs/backup-schedule.md`：数据风险地图、
+  恢复演练、crontab 与 systemd 两种装法、监控清单
+
+**这一轮挖出的真实缺陷（都是"看起来能跑"的那种）**：
+
+1. **损坏的备份快照能覆盖生产库**（严重）。原先只跑 `integrity_check`，
+   而页内容损坏时它**仍返回 ok** —— 真正的崩溃发生在覆盖之后读数据时，
+   那时生产库已毁、回退也未必救得回来。改为逐表真读一遍；快照打不开 /
+   `integrity_check` 抛错 / 恢复后打不开三种情况统一收敛为友好提示 +
+   明确回退指引，并保证目标库分毫未动。
+2. **备份/恢复在同一秒内连续执行必然失败**。`VACUUM INTO` 拒绝写已存在
+   文件，而时间戳只精确到秒。定时任务重试、脚本连跑两次都会直接报错。
+   改为毫秒 + 序号兜底。
+3. 媒体恢复 `cpSync` 缺 `recursive: true`，该路径必然抛错。
+
+**管理端组件级测试**（#30，提交 6429139）
+
+admin 此前只有纯函数单测，交互层零覆盖 —— 这就是"认证门形同虚设"
+能一路通过 typecheck / lint / build 的原因：静态检查对一个**死掉的门**
+视而不见。现补 jsdom 套件 34 项，覆盖认证门、保存链路、字段编辑器与搜索视图。
+
+又带出两处缺陷：**删除一点即删、无二次确认**（不可逆操作且与"编辑"紧挨），
+以及 component 排序/删除按钮**无可访问名称**（只有图标，屏幕阅读器读不出）。
+
+**验证**：`make verify-full` 全绿 —— 后端单测 119、admin 组件 34、
+boot 102（8 skipped）、e2e 15；双 tsconfig 类型检查、eslint（零警告）、
+内核词汇 / 方言分支 / 契约快照三扫描全绿。
+
+**遗留**：
+- [ ] MySQL 驱动仍未验证（用户明确暂不处理）
+- [ ] PG 上的 `MAXSTRPOS=16383` 会对超长文档造成位置截断，已记录为已知限制
