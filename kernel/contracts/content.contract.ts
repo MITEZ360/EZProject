@@ -4,13 +4,17 @@
 
 import type { Entity, EntityTypeDef } from '../primitives/entity.js';
 import type { Principal } from '../primitives/principal.js';
+import type { QueryFilter } from './storage.contract.js';
 
 export interface ContentQuery {
   type: string;
   tenantId: string;
   locale?: string;
   status?: string;
+  /** 等值过滤（快捷方式） */
   filter?: Record<string, unknown>;
+  /** 组合过滤（决策 #26：自定义字段等值/范围/包含查询；字段支持 'data.price' 点路径） */
+  filters?: QueryFilter[];
   limit?: number;
   offset?: number;
 }
