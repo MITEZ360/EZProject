@@ -7,15 +7,28 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Input, Layout, Menu, Space, Typography, message } from 'antd';
 import { api, authApi, getToken, hasSession, setToken } from './lib/api';
 import ContentView from './ContentView';
+import SearchView from './SearchView';
 import TypesView from './TypesView';
 import AuditView from './AuditView';
 import UsersView from './UsersView';
 import RolesView from './RolesView';
 import SettingsView from './SettingsView';
 
+type ViewKey = 'entries' | 'search' | 'types' | 'audit' | 'settings' | 'users' | 'roles';
+
 export default function App() {
   const [authed, setAuthed] = useState(false);
-  const [view, setView] = useState<'entries' | 'types' | 'audit' | 'settings' | 'users' | 'roles'>('entries');
+  const [view, setView] = useState<ViewKey>('entries');
+  /** 搜索页点"打开"时带过来的目标条目；由 ContentView 消费后清空 */
+  const [pendingEdit, setPendingEdit] = useState<{ type: string; id: string } | null>(null);
+
+  const openFromSearch = useCallback((type: string, id: string) => {
+    setPendingEdit({ type, id });
+    setView('entries');
+  }, []);
+
+  // 稳定引用：否则每次渲染都会让 ContentView 的 effect 重跑
+  const consumePending = useCallback(() => setPendingEdit(null), []);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -97,6 +110,7 @@ export default function App() {
           selectedKeys={[view]}
           items={[
             { key: 'entries', label: '内容' },
+            { key: 'search', label: '搜索' },
             { key: 'types', label: '类型管理' },
             { key: 'audit', label: '审计日志' },
             { key: 'users', label: '用户管理' },
@@ -107,12 +121,15 @@ export default function App() {
         />
       </Layout.Sider>
       <Layout.Content style={{ padding: 24 }}>
+        {view === 'search' && <SearchView onOpen={openFromSearch} />}
         {view === 'types' && <TypesView />}
         {view === 'audit' && <AuditView />}
         {view === 'users' && <UsersView />}
         {view === 'roles' && <RolesView />}
         {view === 'settings' && <SettingsView />}
-        {view === 'entries' && <ContentView />}
+        {view === 'entries' && (
+          <ContentView pendingEdit={pendingEdit} onConsumePending={consumePending} />
+        )}
       </Layout.Content>
     </Layout>
   );

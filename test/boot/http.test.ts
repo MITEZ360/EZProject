@@ -246,3 +246,75 @@ async function bootstrapModulesOrder(): Promise<App> {
     ],
   });
 }
+
+describe('字段裁剪 ?fields=（减小 payload）', () => {
+  /** 造一条已发布内容，附带一个多余字段用于观察裁剪 */
+  async function seed(): Promise<void> {
+    await boot({ guard: 'allowAll' });
+    await content().create({
+      type: 'posts',
+      tenantId: 'tenant01',
+      data: { ...POST, status: 'published' },
+      actor,
+    });
+  }
+
+  it('列表：只返回指定字段；顶层结构列不受影响', async () => {
+    await seed();
+    const res = await api.request('/api/v1/posts?fields=title');
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { items: Record<string, unknown>[]; total: number };
+    const item = json.items[0]!;
+    expect(item['data']).toEqual({ title: '你好' });
+    // 结构信息不参与裁剪——否则调用方无法定位/判断条目
+    expect(item['id']).toBeDefined();
+    expect(item['slug']).toBe('hello');
+    expect(item['status']).toBe('published');
+    expect(typeof item['updatedAt']).toBe('number');
+    expect(json.total).toBe(1);
+  });
+
+  it('未知字段名被忽略（不报错、也不凭空造键）', async () => {
+    await seed();
+    const res = await api.request('/api/v1/posts?fields=title,nope,also-nope');
+    const json = (await res.json()) as { items: Record<string, unknown>[] };
+    expect(json.items[0]!['data']).toEqual({ title: '你好' });
+  });
+
+  it('详情路由同样生效', async () => {
+    await seed();
+    const res = await api.request('/api/v1/posts/hello?fields=body');
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json['data']).toEqual({ body: POST.body });
+    expect(json['slug']).toBe('hello');
+  });
+
+  it('不传 fields → 完整 data（向后兼容）', async () => {
+    await seed();
+    const res = await api.request('/api/v1/posts');
+    const json = (await res.json()) as { items: Record<string, unknown>[] };
+    const data = json.items[0]!['data'] as Record<string, unknown>;
+    expect(data['title']).toBe('你好');
+    expect(data['body']).toBeDefined();
+  });
+
+  it('fields 为空串 / 纯逗号 → 视作未指定（不返回空 data）', async () => {
+    await seed();
+    for (const qs of ['fields=', 'fields=,,', 'fields=%20']) {
+      const res = await api.request(`/api/v1/posts?${qs}`);
+      const json = (await res.json()) as { items: Record<string, unknown>[] };
+      expect((json.items[0]!['data'] as Record<string, unknown>)['body']).toBeDefined();
+    }
+  });
+
+  it('裁剪后的响应仍可缓存（缓存键含 query，不同裁剪互不串味）', async () => {
+    await seed();
+    const a = await api.request('/api/v1/posts?fields=title');
+    const b = await api.request('/api/v1/posts?fields=body');
+    expect(a.headers.get('cache-control')).toContain('public');
+    const aj = (await a.json()) as { items: Record<string, unknown>[] };
+    const bj = (await b.json()) as { items: Record<string, unknown>[] };
+    expect(aj.items[0]!['data']).toEqual({ title: '你好' });
+    expect(bj.items[0]!['data']).toEqual({ body: POST.body }); // 未被上一次请求污染
+  });
+});

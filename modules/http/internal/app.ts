@@ -65,6 +65,34 @@ export interface HttpDeps {
 const notFound = (c: { json: (b: unknown, s?: number) => unknown }): Response =>
   c.json({ error: { code: 'E_NOT_FOUND', message: '能力未挂载（模块未加载）' } }, 404) as Response;
 
+/** 解析 `?fields=a,b`；返回 null 表示不裁剪（未指定或全为空白） */
+function parseFields(q: Record<string, string | undefined>): string[] | null {
+  const raw = q['fields'];
+  if (!raw) return null;
+  const list = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : null;
+}
+
+/**
+ * 按 `?fields` 裁剪条目的 `data`。
+ * **只裁 `data`**：顶层列（id/type/slug/locale/status/时间）是结构信息，
+ * 裁掉会让人无法定位条目、也无法判断可见性；未知字段名直接忽略（不报错、不凭空造键）。
+ */
+function projectFields<T extends Record<string, unknown>>(entry: T, fields: string[] | null): T {
+  if (!fields) return entry;
+  const data = entry['data'];
+  if (!data || typeof data !== 'object') return entry;
+  const src = data as Record<string, unknown>;
+  const picked: Record<string, unknown> = {};
+  for (const f of fields) {
+    if (Object.prototype.hasOwnProperty.call(src, f)) picked[f] = src[f];
+  }
+  return { ...entry, data: picked };
+}
+
 export function buildApp(deps: HttpDeps): Hono<Vars> {
   const app = new Hono<Vars>();
 
@@ -190,7 +218,16 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     });
 
     c.header('Cache-Control', principal ? 'private, no-store' : 'public, max-age=60');
-    return c.json({ items: result.hits, total: result.total });
+    const fields = parseFields(q);
+    return c.json({
+      items: fields
+        ? result.hits.map((h) => ({
+            ...h,
+            document: projectFields((h.document ?? {}) as Record<string, unknown>, fields),
+          }))
+        : result.hits,
+      total: result.total,
+    });
   });
 
   // GET /api/v1/:type —— 列表（分页 + 过滤；默认只出 published）
@@ -235,7 +272,12 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     if (hit) c.header('x-cache', 'HIT');
     // 匿名读可进 CDN；预览响应禁止共享缓存
     c.header('Cache-Control', principal ? 'private, no-store' : 'public, max-age=60');
-    return c.json({ items: page.items, total: page.total });
+    // ?fields= 裁剪：缓存键含完整 query，故不同裁剪各自成条目，不会互相串味
+    const fields = parseFields(q);
+    return c.json({
+      items: page.items.map((it) => projectFields(it as Record<string, unknown>, fields)),
+      total: page.total,
+    });
   });
 
   // GET /api/v1/:type/:key —— key 为 UUID 时按 id，否则按 slug
@@ -270,7 +312,7 @@ export function buildApp(deps: HttpDeps): Hono<Vars> {
     if (!entity) return c.json({ error: { code: 'E_NOT_FOUND', message: '条目不存在' } }, 404);
 
     c.header('Cache-Control', principal ? 'private, no-store' : 'public, max-age=60');
-    return c.json(entity);
+    return c.json(projectFields(entity, parseFields(c.req.query())));
   });
 
   // ---------- Management API（对内 · 写 · 守卫） ----------

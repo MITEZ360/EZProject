@@ -22,7 +22,55 @@ interface EditState {
   values: Record<string, unknown>;
 }
 
-export default function ContentView() {
+interface Props {
+  /** 从搜索视图跳转过来时要求直接打开的条目 */
+  pendingEdit?: { type: string; id: string } | null;
+  /** 消费完成后通知外壳清空（避免重复打开） */
+  onConsumePending?: () => void;
+}
+
+/**
+ * 实体值 → 表单值（只做形态转换，控件层不再做类型判断）。
+ * 放在组件外：纯函数无闭包依赖，也就不会成为 effect 的依赖抖动源。
+ */
+function toFormValues(fields: FieldDef[], data: Record<string, unknown>): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const f of fields) {
+    const v = data[f.name];
+    if (v === undefined || v === null) {
+      values[f.name] = emptyFieldValue(f);
+      continue;
+    }
+    values[f.name] =
+      f.type === 'richText'
+        ? ptToMarkdown(v)
+        : f.type === 'json'
+          ? JSON.stringify(v, null, 2)
+          : f.type === 'component'
+            ? normalizeComponentValue(f, v) // 结构化编辑（不再是 JSON 文本）
+            : v;
+  }
+  return values;
+}
+
+/** 表单值 → 实体值（component 已是结构，直接提交） */
+function fromFormValues(fields: FieldDef[], values: Record<string, unknown>): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  for (const f of fields) {
+    const v = values[f.name];
+    if (v === undefined || v === null || v === '') continue;
+    // 空数组 / 空对象仍提交（表示显式清空）
+    data[f.name] =
+      f.type === 'richText'
+        ? markdownToPt(String(v))
+        : f.type === 'json'
+          ? JSON.parse(String(v)) // 解析失败由后端校验兜底并提示
+          : v;
+  }
+  return data;
+}
+
+export default function ContentView({ pendingEdit, onConsumePending }: Props = {}) {
   const [types, setTypes] = useState<EntityTypeDef[]>([]);
   const [activeType, setActiveType] = useState<string>('');
   const [items, setItems] = useState<EntryItem[]>([]);
@@ -58,45 +106,47 @@ export default function ContentView() {
     void refreshEntries(activeType);
   }, [activeType, refreshEntries]);
 
+  // 从搜索跳转：切到目标类型 → 找到该条目 → 直接打开编辑框
+  useEffect(() => {
+    if (!pendingEdit || types.length === 0) return;
+    const td = types.find((t) => t.slug === pendingEdit.type);
+    if (!td) {
+      void message.error(`类型 ${pendingEdit.type} 不存在`);
+      onConsumePending?.();
+      return;
+    }
+    let alive = true;
+    setActiveType(pendingEdit.type);
+    void api
+      .listEntries(pendingEdit.type)
+      .then((page) => {
+        if (!alive) return;
+        const it = page.items.find((x) => x.id === pendingEdit.id);
+        if (!it) {
+          void message.warning('未找到该条目（可能已被删除）');
+          return;
+        }
+        setEditing({
+          id: it.id,
+          type: it.type,
+          slug: it.slug ?? '',
+          status: it.status,
+          values: toFormValues(td.fields, it.data),
+        });
+      })
+      .catch((e) => {
+        if (alive) void message.error(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (alive) onConsumePending?.();
+      });
+    return () => {
+      alive = false;
+    };
+  }, [pendingEdit, types, onConsumePending]);
+
   const typeDef = types.find((t) => t.slug === activeType);
 
-  /** 实体值 → 表单值（只做形态转换，控件层不再做类型判断） */
-  const toFormValues = (fields: FieldDef[], data: Record<string, unknown>): Record<string, unknown> => {
-    const values: Record<string, unknown> = {};
-    for (const f of fields) {
-      const v = data[f.name];
-      if (v === undefined || v === null) {
-        values[f.name] = emptyFieldValue(f);
-        continue;
-      }
-      values[f.name] =
-        f.type === 'richText'
-          ? ptToMarkdown(v)
-          : f.type === 'json'
-            ? JSON.stringify(v, null, 2)
-            : f.type === 'component'
-              ? normalizeComponentValue(f, v) // 结构化编辑（不再是 JSON 文本）
-              : v;
-    }
-    return values;
-  };
-
-  /** 表单值 → 实体值（component 已是结构，直接提交） */
-  const fromFormValues = (fields: FieldDef[], values: Record<string, unknown>): Record<string, unknown> => {
-    const data: Record<string, unknown> = {};
-    for (const f of fields) {
-      const v = values[f.name];
-      if (v === undefined || v === null || v === '') continue;
-      // 空数组 / 空对象仍提交（表示显式清空）
-      data[f.name] =
-        f.type === 'richText'
-          ? markdownToPt(String(v))
-          : f.type === 'json'
-            ? JSON.parse(String(v)) // 解析失败由后端校验兜底并提示
-            : v;
-    }
-    return data;
-  };
 
   const save = async (): Promise<void> => {
     if (!editing || !typeDef) return;
