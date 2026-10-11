@@ -31,6 +31,7 @@
 - **决策 #26 第二步落地**：`defineType` 落库（逻辑 Schema：类型定义是数据，更新不迁移旧数据）+ `listTypes`/`getType` 契约 + 类型管理 API（`POST/GET /api/manage/v1/types`）+ 跨重启持久化验证
 
 ### Fixed
+- **内存缓存改有界 LRU**：原无上限 `Map` 可被外部撑爆（缓存 key 含完整 query string，`?offset=N` 等可产生无限 key）→ 条数上限（默认 1000）+ 近似字节上限（默认 8 MiB）+ LRU 淘汰；命中保鲜、覆盖写不重复计容、纯 LRU 覆盖过期回收（无热路径全表扫）
 - **驱动布尔落库**：按契约 6.5 转 INTEGER（原直接绑定布尔报错）
 - **UUIDv7 同毫秒单调递增**：原实现同毫秒尾部随机导致按 id 排序不稳定（审计 tie-break 偶发失败）；改为 48位时间戳+12位同毫秒序号+62位随机
 - **SQLite 驱动事务并发缺陷**：单连接上并发 `transaction()` 调用（如 `Promise.all`）交错污染事务（`no such savepoint`）→ 外层调用排队互斥、嵌套调用放行（SAVEPOINT 语义不受影响）
