@@ -111,6 +111,109 @@ describe('sqlite 驱动（实现 StorageDriver 契约）', () => {
   });
 });
 
+describe('sqlite 事务语义（契约 v1.1：可重入）', () => {
+  it('嵌套 transaction() 不报错，内层操作随外层一起提交', async () => {
+    await driver.transaction(async (tx) => {
+      await tx.insert('entries', {
+        id: 'n1', tenantId: 't', type: 'posts', locale: 'zh',
+        status: 'draft', data: {}, createdAt: 1, updatedAt: 1, deletedAt: 0,
+      });
+      // 模块间组合的必然场景：事务内经过另一层服务再开事务
+      await driver.transaction(async (tx2) => {
+        await tx2.insert('entries', {
+          id: 'n2', tenantId: 't', type: 'posts', locale: 'zh',
+          status: 'draft', data: {}, createdAt: 2, updatedAt: 2, deletedAt: 0,
+        });
+      });
+    });
+    const rows = await driver.transaction((tx) => tx.find<{ id: string }>({ table: 'entries' }));
+    expect(rows.map((r) => r.id).sort()).toEqual(['n1', 'n2']);
+  });
+
+  it('内层失败被外层捕获后，外层可选择继续并提交', async () => {
+    await driver.transaction(async (tx) => {
+      await tx.insert('entries', {
+        id: 'keep', tenantId: 't', type: 'posts', locale: 'zh',
+        status: 'draft', data: {}, createdAt: 1, updatedAt: 1, deletedAt: 0,
+      });
+      try {
+        await driver.transaction(async (tx2) => {
+          await tx2.insert('entries', {
+            id: 'bad', tenantId: 't', type: 'posts', locale: 'zh',
+            status: 'draft', data: {}, createdAt: 2, updatedAt: 2, deletedAt: 0,
+          });
+          throw new Error('内层业务错误');
+        });
+      } catch {
+        /* 外层决定吞掉内层错误，继续事务 */
+      }
+    });
+    const rows = await driver.transaction((tx) => tx.find<{ id: string }>({ table: 'entries' }));
+    expect(rows.map((r) => r.id)).toEqual(['keep']); // bad 已随保存点回滚，keep 保留
+  });
+
+  it('外层失败整体回滚（含嵌套内的写入）', async () => {
+    await expect(
+      driver.transaction(async (tx) => {
+        await tx.insert('entries', {
+          id: 'r1', tenantId: 't', type: 'posts', locale: 'zh',
+          status: 'draft', data: {}, createdAt: 1, updatedAt: 1, deletedAt: 0,
+        });
+        await driver.transaction(async (tx2) => {
+          await tx2.insert('entries', {
+            id: 'r2', tenantId: 't', type: 'posts', locale: 'zh',
+            status: 'draft', data: {}, createdAt: 2, updatedAt: 2, deletedAt: 0,
+          });
+        });
+        throw new Error('外层失败');
+      })
+    ).rejects.toThrow('外层失败');
+    const rows = await driver.transaction((tx) => tx.find<{ id: string }>({ table: 'entries' }));
+    expect(rows).toEqual([]);
+  });
+});
+
+describe('sqlite 错误收敛与 count', () => {
+  it('约束冲突收敛为 StorageError(E_CONFLICT)，不泄漏 SqliteError', async () => {
+    const insert = () =>
+      driver.transaction((tx) =>
+        tx.insert('entries', {
+          id: 'dup', tenantId: 't', type: 'posts', locale: 'zh',
+          status: 'draft', data: {}, createdAt: 1, updatedAt: 1, deletedAt: 0,
+        })
+      );
+    await insert();
+    try {
+      await insert();
+      expect.unreachable('应抛出冲突错误');
+    } catch (e) {
+      expect((e as Error).name).toBe('E_CONFLICT');
+      expect(String((e as Error).message)).not.toContain('SQLITE_'); // 方言错误码不外漏
+    }
+  });
+
+  it('tx.count 统计行数（不取回数据）', async () => {
+    for (let i = 1; i <= 5; i++) {
+      await driver.transaction((tx) =>
+        tx.insert('entries', {
+          id: `c${i}`, tenantId: 't', type: i <= 3 ? 'posts' : 'pages', locale: 'zh',
+          status: 'draft', data: {}, createdAt: i, updatedAt: i, deletedAt: 0,
+        })
+      );
+    }
+    const n = await driver.transaction((tx) =>
+      tx.count({ table: 'entries', where: { tenantId: 't', type: 'posts' } })
+    );
+    expect(n).toBe(3);
+  });
+
+  it('未声明的表结构直接报错（禁止启发式 JSON 解析）', async () => {
+    await expect(
+      driver.transaction((tx) => tx.find({ table: 'unknown_table' } as never))
+    ).rejects.toThrow('未声明的表结构');
+  });
+});
+
 describe('策略工厂', () => {
   it('未实现的方言给出明确错误（而非静默失败）', () => {
     const pg: StorageConfig = { dialect: 'postgres' };

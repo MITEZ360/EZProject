@@ -34,7 +34,7 @@ export function createContentService(
   driver: StorageDriver,
   getTypeDef: (type: string, tenantId: string) => EntityTypeDef | undefined
 ): ContentService {
-  return {
+  const svc = {
     async defineType(): Promise<void> {
       // 类型定义由 content 模块在 setup 时通过内部注册表管理；
       // 此处保留契约方法（阶段一先内存态，后续落 content_types 表）。
@@ -49,19 +49,21 @@ export function createContentService(
       if (query.locale) where['locale'] = query.locale;
       if (query.status) where['status'] = query.status;
 
-      const rows = await driver.transaction((tx) =>
-        tx.find<EntryRow>({
-          table: TABLE,
-          where: { ...where, ...(query.filter ?? {}) },
-          orderBy: [{ field: 'createdAt', dir: 'desc' }],
-          limit: query.limit ?? 20,
-          offset: query.offset ?? 0,
-        })
-      );
-      const all = await driver.transaction((tx) =>
-        tx.find<EntryRow>({ table: TABLE, where })
-      );
-      return { items: rows as unknown as Entity[], total: all.length };
+      // 单事务内完成"取分页数据 + 计数"：total 与 items 保证同一一致性视图。
+      // 计数用 tx.count（SQL COUNT），禁止全量取回再取 length。
+      return driver.transaction(async (tx) => {
+        const [items, total] = await Promise.all([
+          tx.find<EntryRow>({
+            table: TABLE,
+            where: { ...where, ...(query.filter ?? {}) },
+            orderBy: [{ field: 'createdAt', dir: 'desc' }],
+            limit: query.limit ?? 20,
+            offset: query.offset ?? 0,
+          }),
+          tx.count({ table: TABLE, where }),
+        ]);
+        return { items: items as unknown as Entity[], total };
+      });
     },
 
     async findOne(id: string, tenantId: string): Promise<Entity | null> {
@@ -101,7 +103,8 @@ export function createContentService(
     },
 
     async update(id: string, input: ContentUpdateInput): Promise<Entity> {
-      const current = await this.findOne(id, input.tenantId);
+      // 通过闭包引用 svc 而非 this：方法被解构/作为回调传递时依然安全。
+      const current = await svc.findOne(id, input.tenantId);
       if (!current) {
         throw mapError(platformError('E_NOT_FOUND', `条目不存在: ${id}`));
       }
@@ -125,7 +128,7 @@ export function createContentService(
     },
 
     async remove(id: string, tenantId: string): Promise<void> {
-      const current = await this.findOne(id, tenantId);
+      const current = await svc.findOne(id, tenantId);
       if (!current) {
         throw mapError(platformError('E_NOT_FOUND', `条目不存在: ${id}`));
       }
@@ -135,6 +138,7 @@ export function createContentService(
       );
     },
   };
+  return svc;
 }
 
 /** 统一把内核错误包成标准 Error（服务层供内部使用；对外 API 层再包 Result） */
