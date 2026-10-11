@@ -36,6 +36,7 @@
 - 产出两份核心文档：`docs/design.md`（设计）、`docs/engineering-spec.md`（工程规范）。
 - 建立文档体系（README / dev-log / changelog / cookbook）。
 - **初始化本地 git 仓库**，完成首次提交（`7d7e0c4`）。
+- **确立分支策略**：默认分支由 `master` 更名为 **`main`**，新建长期分支 **`kernel`**（内核唯一演进线）；策略见 `docs/git-workflow.md`。
 - **补充 vibe-cookbook**：新增"给 AI 定框架的元方法"章节，精简冗余条目。
 - **重构 vibe-cookbook 结构**：分为「通用准则（G）」与「本项目准则（P）」两部分——
   方法论与项目约定分离，通用部分可复用到其他项目。
