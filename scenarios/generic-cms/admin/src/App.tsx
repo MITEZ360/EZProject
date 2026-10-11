@@ -8,10 +8,12 @@ import { Button, Input, Layout, Menu, Space, Typography, message } from 'antd';
 import { api, getToken, setToken } from './lib/api';
 import ContentView from './ContentView';
 import TypesView from './TypesView';
+import AuditView from './AuditView';
+import SettingsView from './SettingsView';
 
 export default function App() {
   const [authed, setAuthed] = useState(false);
-  const [view, setView] = useState<'entries' | 'types'>('entries');
+  const [view, setView] = useState<'entries' | 'types' | 'audit' | 'settings'>('entries');
 
   const enter = useCallback(async () => {
     try {
@@ -55,12 +57,17 @@ export default function App() {
           items={[
             { key: 'entries', label: '内容' },
             { key: 'types', label: '类型管理' },
+            { key: 'audit', label: '审计日志' },
+            { key: 'settings', label: '系统设置' },
           ]}
-          onClick={({ key }) => setView(key as 'entries' | 'types')}
+          onClick={({ key }) => setView(key as typeof view)}
         />
       </Layout.Sider>
       <Layout.Content style={{ padding: 24 }}>
-        {view === 'types' ? <TypesView /> : <ContentView />}
+        {view === 'types' && <TypesView />}
+        {view === 'audit' && <AuditView />}
+        {view === 'settings' && <SettingsView />}
+        {view === 'entries' && <ContentView />}
       </Layout.Content>
     </Layout>
   );

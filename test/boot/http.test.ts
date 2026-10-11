@@ -71,6 +71,52 @@ describe('Content API（只读 · 匿名 · 可缓存）', () => {
     expect(res.status).toBe(404);
   });
 
+  it('自定义字段查询：?filter[字段][操作]=值（决策 #26 透出到 API）', async () => {
+    await boot({ guard: 'allowAll' });
+    const c = content();
+    await c.defineType(
+      {
+        slug: 'products',
+        fields: [
+          { name: 'name', type: 'text' },
+          { name: 'price', type: 'number' },
+          { name: 'tags', type: 'select', options: ['hot', 'cold', 'sale'], multiple: true },
+        ],
+      },
+      actor
+    );
+    const mk = (slug: string, price: number, tags: string[]) =>
+      c.create({
+        type: 'products',
+        tenantId: 'tenant01',
+        data: { name: slug, slug, status: 'published', price, tags },
+        actor,
+      });
+    await mk('p1', 10, ['cold']);
+    await mk('p2', 50, ['hot', 'sale']);
+    await mk('p3', 100, ['hot']);
+
+    // eq：JSON 字段等值
+    const eq = await api.request('/api/v1/products?filter[price][eq]=50');
+    expect(((await eq.json()) as { total: number }).total).toBe(1);
+
+    // 范围：gte + lt（AND）
+    const range = await api.request('/api/v1/products?filter[price][gte]=50&filter[price][lt]=100');
+    expect(((await range.json()) as { total: number }).total).toBe(1);
+
+    // contains（数组包含）
+    const hot = await api.request('/api/v1/products?filter[tags][contains]=hot');
+    expect(((await hot.json()) as { total: number }).total).toBe(2);
+
+    // in（顶层列）
+    const inq = await api.request('/api/v1/products?filter[slug][in]=p1,p3&status=all');
+    expect(((await inq.json()) as { total: number }).total).toBe(2);
+
+    // 非法操作符 → 400
+    const bad = await api.request('/api/v1/products?filter[price][between]=1');
+    expect(bad.status).toBe(400);
+  });
+
   it('status=all 可取全部（含草稿，供预览类消费方）', async () => {
     await boot({ guard: 'allowAll' });
     await content().create({ type: 'posts', tenantId: 'tenant01', data: POST, actor });

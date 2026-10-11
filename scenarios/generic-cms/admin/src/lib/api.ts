@@ -87,3 +87,34 @@ export const apiTypes = {
   defineType: (def: EntityTypeDef) =>
     request<{ ok: boolean }>('POST', '/api/manage/v1/types', def),
 };
+
+// ==================== 通用管理能力（模块贡献端点） ====================
+
+export interface AuditEntry {
+  id: string;
+  tenantId: string;
+  event: string;
+  actorId: string;
+  detail: Record<string, unknown>;
+  occurredAt: number;
+}
+
+export interface SettingItem {
+  key: string;
+  value: unknown;
+  updatedAt: number;
+}
+
+export const auditApi = {
+  list: (event?: string) =>
+    request<{ items: AuditEntry[] }>(
+      'GET',
+      `/api/manage/v1/audit-logs?limit=100${event ? `&event=${encodeURIComponent(event)}` : ''}`
+    ),
+};
+
+export const settingsApi = {
+  list: () => request<{ items: SettingItem[] }>('GET', '/api/manage/v1/settings'),
+  set: (key: string, value: unknown) =>
+    request<{ ok: boolean }>('PUT', `/api/manage/v1/settings/${encodeURIComponent(key)}`, { value }),
+};
