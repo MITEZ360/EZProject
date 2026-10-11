@@ -17,13 +17,25 @@ function toBase62(bytes: Uint8Array): string {
   return out;
 }
 
+/** 同毫秒内的单调计数器（rand_a 12 位）：保证 UUIDv7 严格递增（规范推荐）。
+ *  用途：同毫秒批量写入时按 id 排序稳定（审计日志、列表 tie-break 等）。 */
+let lastMs = 0;
+let seqInMs = 0;
+
 /**
- * 通用实体 id：UUIDv7（时间有序）。
- * 自实现：48 位毫秒时间戳 + 版本/变体位 + 随机位。
+ * 通用实体 id：UUIDv7（时间有序，**同毫秒内单调递增**）。
+ * 自实现：48 位毫秒时间戳 + 12 位同毫秒序号 + 版本/变体位 + 随机位。
  * 不依赖第三方 uuid 库，保持内核零外部依赖。
  */
 export function newId(): string {
-  const now = BigInt(Date.now());
+  const ms = Date.now();
+  if (ms === lastMs) {
+    seqInMs = (seqInMs + 1) & 0xfff; // 12 位内循环；同毫秒 4096 个 id 后回绕（可接受）
+  } else {
+    lastMs = ms;
+    seqInMs = 0;
+  }
+  const now = BigInt(ms);
   const bytes = new Uint8Array(16);
 
   // 前 48 位：毫秒时间戳（大端）
@@ -34,11 +46,15 @@ export function newId(): string {
   bytes[4] = Number((now >> 8n) & 0xffn);
   bytes[5] = Number(now & 0xffn);
 
-  // 后 80 位：随机
-  const rand = randomBytes(10);
-  for (let i = 0; i < 10; i++) bytes[6 + i] = rand[i] ?? 0;
+  // 第 6-7 字节低 12 位：同毫秒序号（rand_a，单调递增）
+  bytes[6] = (seqInMs >> 8) & 0x0f;
+  bytes[7] = seqInMs & 0xff;
 
-  // 版本位（第 7 字节高 4 位 = 0111 => v7）
+  // 其余 62 位随机（rand_b）
+  const rand = randomBytes(8);
+  for (let i = 0; i < 8; i++) bytes[8 + i] = rand[i] ?? 0;
+
+  // 版本位（第 7 字节高 4 位 = 0111 => v7）；序号只占 bytes[6] 低 4 位 + bytes[7] 全部
   bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x70;
   // 变体位（第 9 字节高 2 位 = 10）
   bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
