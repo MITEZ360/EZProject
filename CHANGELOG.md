@@ -13,6 +13,9 @@
 - **管理端归位**：`scenarios/blog/admin` → `scenarios/generic-cms/admin`（通用 CMS 管理端）；内容视图按类型定义动态渲染（零写死字段），App 壳零业务词汇；博客场景复用通用 admin、仅保留类型种子
 
 ### Added
+- **`modules/authz`（身份与权限）**：JWT 访问令牌（HMAC-SHA256，零依赖）+ **可撤销/轮换刷新令牌**（重放触发全量撤销）；RBAC（角色→权限点，`*` 通配）+ scope（字段级 `deniedFields` 剥离）；用户/角色管理；scrypt 口令哈希 + 恒定时间比较
+- **HTTP 认证**：`/auth/login|refresh|logout|bootstrap|me`；守卫链 JWT → 引导令牌 → 场景守卫；写操作鉴权（403）
+- **admin**：邮箱密码登录 + 令牌自动刷新
 - **Content API 过滤查询**：`?filter[字段][操作]=值`（eq/ne/gt/gte/lt/lte/in/contains；非保留字段自动落 `data.*`，对外不暴露存储形状）；`ContentQuery.filters` 契约；find/count 同一套条件
 - **`scenarios/generic-cms` 通用 CMS 场景**：storage+content(无内建类型)+http+audit+settings；Makefile 交付物切换至通用 CMS
 - **后台**：审计日志页（事件筛选）+ 系统设置页（KV 编辑）
@@ -22,6 +25,7 @@
 - **决策 #26 第二步落地**：`defineType` 落库（逻辑 Schema：类型定义是数据，更新不迁移旧数据）+ `listTypes`/`getType` 契约 + 类型管理 API（`POST/GET /api/manage/v1/types`）+ 跨重启持久化验证
 
 ### Fixed
+- **驱动布尔落库**：按契约 6.5 转 INTEGER（原直接绑定布尔报错）
 - **UUIDv7 同毫秒单调递增**：原实现同毫秒尾部随机导致按 id 排序不稳定（审计 tie-break 偶发失败）；改为 48位时间戳+12位同毫秒序号+62位随机
 - **SQLite 驱动事务并发缺陷**：单连接上并发 `transaction()` 调用（如 `Promise.all`）交错污染事务（`no such savepoint`）→ 外层调用排队互斥、嵌套调用放行（SAVEPOINT 语义不受影响）
 - **决策 #26 第一步落地**：`FieldDef` 契约演进（11 种调色板 + 通用选项）+ 校验器全类型实现（component 递归 ≤3、未知字段拒绝、dateOnly UTC 零点）；契约快照更新（core/field-type-palette → kernel → main）
