@@ -20,6 +20,7 @@ import {
 } from 'antd';
 import { ApiError, api, getToken, setToken, type PostListItem } from './lib/api';
 import { markdownToPt, ptToMarkdown } from '@modules/content/editor/normalize.js';
+import TypesView from './TypesView';
 
 interface EditState {
   id?: string;
@@ -33,6 +34,7 @@ const EMPTY: EditState = { title: '', slug: '', status: 'draft', markdown: '' };
 
 export default function App() {
   const [authed, setAuthed] = useState(false);
+  const [view, setView] = useState<'posts' | 'types'>('posts');
   const [items, setItems] = useState<PostListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<EditState | null>(null);
@@ -132,12 +134,27 @@ export default function App() {
         <Menu
           theme="dark"
           mode="inline"
-          selectable={false}
-          items={[{ key: 'new', label: '新建文章' }]}
-          onClick={() => setEditing({ ...EMPTY })}
+          selectedKeys={[view]}
+          items={[
+            { key: 'posts', label: '文章' },
+            { key: 'types', label: '类型管理' },
+          ]}
+          onClick={({ key }) => {
+            if (key === 'posts') setView('posts');
+            if (key === 'types') setView('types');
+          }}
         />
       </Layout.Sider>
       <Layout.Content style={{ padding: 24 }}>
+        {view === 'types' ? (
+          <TypesView />
+        ) : (
+          <>
+        <Space style={{ marginBottom: 16 }}>
+          <Button type="primary" onClick={() => setEditing({ ...EMPTY })}>
+            新建文章
+          </Button>
+        </Space>
         {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
         <Table<PostListItem>
           rowKey="id"
@@ -184,6 +201,8 @@ export default function App() {
             },
           ]}
         />
+          </>
+        )}
       </Layout.Content>
 
       <Modal

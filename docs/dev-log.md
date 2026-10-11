@@ -325,3 +325,25 @@ engineering-spec 4.2 本就规定编辑器双模式归一在 `modules/content/ed
 - [ ] 通用管理模块路线（已定：authz / audit(事件总线) / settings 服务能力 + 通用 admin 壳）
 
 ---
+
+## 2026-10-11 · 后台类型编辑器 UI（分支 `feature/admin-type-editor`，决策 #26 第三步）
+
+**做了什么**：
+- blog admin 新增"**类型管理**"视图（侧边栏切换）：
+  - 类型列表（slug + 字段标签，含类型中文名）
+  - 新建/编辑表单：slug 输入（编辑态锁定）、**字段动态增删**、11 种调色板下拉、必填开关、select 选项编辑
+  - 界面明示"更新定义不迁移旧数据"（逻辑 Schema 语义）
+- 类型定义直接 **import 内核原语**（`@kernel/primitives/entity.js`）——单一事实来源，不复制（吸取上次复核教训）
+- 依赖：`@ant-design/icons`
+
+**验证**：
+- admin 双检查（tsc admin 配置 + eslint）过；vite build 过；全套 86/86
+- 端到端冒烟 5/5：`/admin` 200、API 动态定义 `products` 类型（含 number/select多选/media 字段）、
+  用新类型建条目 201、违反枚举 400、类型列表含动态+内建类型
+
+**遗留（#26 后续）**：
+- [ ] component 字段的可视化编辑（当前 UI 支持扁平字段；嵌套结构走 API 定义）
+- [ ] JSON 字段查询契约扩展（QuerySpec，走 core/ 分支）
+- [ ] 通用管理模块（authz / audit / settings + 通用 admin 壳）
+
+---
