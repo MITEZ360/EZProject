@@ -871,3 +871,50 @@ N 个模块必然漂移。代价已经实测发生：5 张表在 PG 上完全不
 实现走 `feature/private-table-ddl` → `main`。内核目录零违规改动。
 
 ---
+
+## 2026-10-11 · 管理端字段编辑体验补全（分支 `feature/admin-field-editors`）
+
+**缘起**：服务端 11 种字段类型与相关 API 早已就绪，但管理端把它们当"占位控件"用——
+relation 要手输目标 UUID、component 要贴 JSON 文本、media 要手输资产 ID。
+对"通用 CMS 覆盖各种业务"的定位来说，等于卖点没兑现。
+
+**变更**（纯前端，零后端改动——`api.listEntries` 与 `assetsApi.list` 本就存在）：
+
+- **relation → 内容选择器**：按 `targetType` 拉目标类型条目，选项显示人类可读标题
+  （`entryTitle` 按 title → name → label → slug → id 的通用优先级探测，**不写死业务字段**）；
+  未限定 `targetType` 时允许先选类型。已有引用超出拉取窗口时补一条只读项，而不是显示空白。
+- **component → 递归嵌套表单**：单实例渲染为卡片；`repeatable` 渲染为可增删 / 上下移的卡片列表；
+  递归深度上限 4（类型定义层已限制 ≤3，这里防脏数据导致栈溢出）。
+- **media → 媒体库选择器**：缩略图网格 + 文件名，支持就地上传并自动选中。
+  资产列表接口不返回 `url`，按公开下载端点 `/api/v1/assets/:id` 自行拼装。
+- **抽出可测的纯逻辑** `lib/entry-format.ts`（`entryTitle` / `emptyFieldValue` /
+  `emptyComponentValue` / `normalizeComponentValue`）——admin 此前**零测试**，这批补上 14 条。
+
+**顺带修复：浏览器真机验证抓到的两个缺陷**：
+
+1. **认证门形同虚设**（安全）：`App.tsx` 的 `probe()` 里 `setAuthed(true)` 写在
+   `if (hasSession())` **之外**，于是 healthz 一通就放行——未登录也能进入后台界面
+   （数据接口各自 401，但门本身失守）。改为无会话直接留在登录页。
+   **这类缺陷 typecheck 与 build 都发现不了，只有真跑才暴露**——这正是本轮坚持做
+   浏览器端到端验证的价值所在。
+2. 页面标题仍是"博客后台 · Headless CMS"（通用 CMS 场景沿用了博客时代的文案），
+   改为"内容管理后台"。
+
+**验证**：
+- 单测 **118**（新增 `entry-format.test.ts` 14 条）；SQLite boot 84 / PG 67 / e2e 2 全绿；
+  `typecheck:admin` + `vite build` 通过；lint / 三扫描全绿
+- **浏览器端到端**（agent-browser + 真实服务 + 真实 SQLite）：
+  建类型（含 media / component / relation 三种字段）→ 建 2 条内容 → 登录 → 打开新建表单，逐项确认：
+  - relation 下拉显示「示例文章乙 · beta」等**标题**（不再是 UUID）
+  - 点"添加blocks"后出现嵌套卡片（heading 输入 + highlight 开关 + 排序/删除，单项时排序按钮禁用）
+  - media 弹窗显示"媒体库为空，先上传一个"空态与上传按钮
+  - 未登录时**正确停在登录页**（修复后）
+
+**遗留**：
+- [ ] admin 仍无组件级测试（只有纯函数单测）。若要覆盖交互，需引入 jsdom + testing-library
+      （当前未装——按"依赖少"原则，等真有回归需求再加）
+- [ ] 启动时若 SQLite 文件所在目录不存在，服务直接失败（英文原生错误）。
+      实测踩到：`Cannot open database because the directory does not exist`。
+      对"解压即用"的定位而言，驱动自动建父目录更合适（待定）
+
+---

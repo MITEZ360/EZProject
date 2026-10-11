@@ -1,34 +1,16 @@
 // scenarios/generic-cms/admin/src/ContentView.tsx
 // 通用内容管理视图：选类型 → 列表 → 按字段定义动态渲染的编辑表单。
 // 不写死任何业务字段——一切由类型定义（决策 #26 调色板）驱动。
+//
+// 本文件只负责"列表 + 表单骨架 + 值形态转换"；
+// 单字段控件（含 relation 选择器 / media 媒体库 / component 递归嵌套）见 components/FieldControl。
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  Alert,
-  Button,
-  DatePicker,
-  Input,
-  InputNumber,
-  Modal,
-  Select,
-  Space,
-  Switch,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
-import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
-import {
-  ApiError,
-  api,
-  apiTypes,
-  assetsApi,
-  type EntryItem,
-  type EntityTypeDef,
-  type FieldDef,
-} from './lib/api';
+import { Alert, Button, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
+import { ApiError, api, apiTypes, type EntryItem, type EntityTypeDef, type FieldDef } from './lib/api';
+import { emptyFieldValue, emptyFormValues, normalizeComponentValue } from './lib/entry-format';
+import { FieldRows } from './components/FieldControl';
 import { markdownToPt, ptToMarkdown } from '@modules/content/editor/normalize.js';
 
 interface EditState {
@@ -36,7 +18,8 @@ interface EditState {
   type: string;
   slug: string;
   status: string;
-  values: Record<string, unknown>; // 字段名 → 表单原始值（richText=markdown，json/component=字符串）
+  /** 字段名 → 表单值（richText=Markdown 文本，json=JSON 文本，component=结构化对象/数组） */
+  values: Record<string, unknown>;
 }
 
 export default function ContentView() {
@@ -77,39 +60,40 @@ export default function ContentView() {
 
   const typeDef = types.find((t) => t.slug === activeType);
 
+  /** 实体值 → 表单值（只做形态转换，控件层不再做类型判断） */
   const toFormValues = (fields: FieldDef[], data: Record<string, unknown>): Record<string, unknown> => {
     const values: Record<string, unknown> = {};
     for (const f of fields) {
       const v = data[f.name];
       if (v === undefined || v === null) {
-        values[f.name] = f.type === 'boolean' ? false : f.type === 'select' && f.multiple ? [] : undefined;
+        values[f.name] = emptyFieldValue(f);
         continue;
       }
       values[f.name] =
         f.type === 'richText'
           ? ptToMarkdown(v)
-          : f.type === 'json' || f.type === 'component'
+          : f.type === 'json'
             ? JSON.stringify(v, null, 2)
-            : f.type === 'date'
-              ? dayjs(v as number)
+            : f.type === 'component'
+              ? normalizeComponentValue(f, v) // 结构化编辑（不再是 JSON 文本）
               : v;
     }
     return values;
   };
 
+  /** 表单值 → 实体值（component 已是结构，直接提交） */
   const fromFormValues = (fields: FieldDef[], values: Record<string, unknown>): Record<string, unknown> => {
     const data: Record<string, unknown> = {};
     for (const f of fields) {
       const v = values[f.name];
       if (v === undefined || v === null || v === '') continue;
+      // 空数组 / 空对象仍提交（表示显式清空）
       data[f.name] =
         f.type === 'richText'
           ? markdownToPt(String(v))
-          : f.type === 'json' || f.type === 'component'
+          : f.type === 'json'
             ? JSON.parse(String(v)) // 解析失败由后端校验兜底并提示
-            : f.type === 'date'
-              ? (v as dayjs.Dayjs).valueOf()
-              : v;
+            : v;
     }
     return data;
   };
@@ -148,109 +132,25 @@ export default function ContentView() {
     }
   };
 
+  /** 列表单元格：引用类字段只存 ID，列表不做二次解析（避免 N 次查询） */
   const renderCell = (f: FieldDef, v: unknown): string => {
-    if (v === undefined || v === null) return '—';
-    if (f.type === 'richText') {
-      const n = ptToMarkdown(v).length;
-      return `${n} 字`;
-    }
-    if (f.type === 'boolean') return v ? '是' : '否';
-    if (f.type === 'date') return new Date(v as number).toLocaleString();
-    if (f.type === 'json' || f.type === 'component') return JSON.stringify(v).slice(0, 40) + '…';
-    if (Array.isArray(v)) return v.join('、');
-    return String(v);
-  };
-
-  const renderControl = (f: FieldDef, values: Record<string, unknown>): React.ReactNode => {
-    const set = (v: unknown): void =>
-      setEditing((cur) => (cur ? { ...cur, values: { ...cur.values, [f.name]: v } } : cur));
-    const v = values[f.name];
+    if (v === undefined || v === null || v === '') return '—';
     switch (f.type) {
-      case 'text':
-        return <Input value={(v as string) ?? ''} onChange={(e) => set(e.target.value)} />;
-      case 'longText':
-        return <Input.TextArea rows={3} value={(v as string) ?? ''} onChange={(e) => set(e.target.value)} />;
-      case 'number':
-        return (
-          <InputNumber
-            style={{ width: '100%' }}
-            precision={f.integer ? 0 : undefined}
-            min={f.min}
-            max={f.max}
-            value={(v as number) ?? undefined}
-            onChange={(n) => set(n)}
-          />
-        );
-      case 'boolean':
-        return <Switch checked={Boolean(v)} onChange={(b) => set(b)} />;
-      case 'date':
-        return (
-          <DatePicker
-            style={{ width: '100%' }}
-            showTime={!f.dateOnly}
-            value={v ? dayjs(v as number) : undefined}
-            onChange={(d) => set(d ? d.valueOf() : undefined)}
-          />
-        );
-      case 'select':
-        return (
-          <Select
-            style={{ width: '100%' }}
-            mode={f.multiple ? 'multiple' : undefined}
-            allowClear
-            value={v as string | string[] | undefined}
-            options={(f.options ?? []).map((o) => ({ value: o, label: o }))}
-            onChange={(x) => set(x)}
-          />
-        );
       case 'richText':
-        return (
-          <Input.TextArea
-            rows={8}
-            value={(v as string) ?? ''}
-            onChange={(e) => set(e.target.value)}
-            placeholder={'Markdown，保存时归一为 Portable Text\n# 标题\n\n段落\n\n- 列表'}
-          />
-        );
+        return `${ptToMarkdown(v).length} 字`;
+      case 'boolean':
+        return v ? '是' : '否';
+      case 'date':
+        return new Date(v as number).toLocaleString();
       case 'relation':
-        return <Input value={(v as string) ?? ''} onChange={(e) => set(e.target.value)} placeholder="目标条目 ID" />;
       case 'media':
-        return (
-          <Space.Compact style={{ width: '100%' }}>
-            <Input value={(v as string) ?? ''} onChange={(e) => set(e.target.value)} placeholder="资产 ID" />
-            <Button
-              icon={<UploadOutlined />}
-              onClick={() => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.onchange = async () => {
-                  const file = input.files?.[0];
-                  if (!file) return;
-                  try {
-                    const asset = await assetsApi.upload(file);
-                    set(asset.id);
-                    void message.success(`已上传：${asset.filename}`);
-                  } catch (e) {
-                    void message.error(e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
-                  }
-                };
-                input.click();
-              }}
-            >
-              上传
-            </Button>
-          </Space.Compact>
-        );
-      case 'json':
+        return `${String(v).slice(0, 8)}…`;
       case 'component':
-        return (
-          <Input.TextArea
-            rows={5}
-            value={(v as string) ?? ''}
-            onChange={(e) => set(e.target.value)}
-            placeholder={f.type === 'json' ? '{"任意": "JSON"}' : '{...}（按字段定义的结构）'}
-          />
-        );
+        return Array.isArray(v) ? `${v.length} 项` : '1 项';
+      case 'json':
+        return JSON.stringify(v).slice(0, 40) + '…';
+      default:
+        return Array.isArray(v) ? v.join('、') : String(v);
     }
   };
 
@@ -274,7 +174,7 @@ export default function ContentView() {
               type: activeType,
               slug: '',
               status: 'draft',
-              values: toFormValues(typeDef.fields, {}),
+              values: emptyFormValues(typeDef.fields),
             })
           }
         >
@@ -341,7 +241,7 @@ export default function ContentView() {
         onCancel={() => setEditing(null)}
         onOk={() => void save()}
         confirmLoading={saving}
-        width={760}
+        width={820}
         okText="保存"
       >
         {editing && typeDef && (
@@ -368,16 +268,13 @@ export default function ContentView() {
                 />
               </div>
             </Space>
-            {typeDef.fields.map((f) => (
-              <div key={f.name} style={{ marginBottom: 16 }}>
-                <div style={{ marginBottom: 4 }}>
-                  {f.name}
-                  {f.required && <span style={{ color: '#c0392b' }}> *</span>}
-                  <Typography.Text type="secondary" style={{ marginLeft: 8 }}>{f.type}</Typography.Text>
-                </div>
-                {renderControl(f, editing.values)}
-              </div>
-            ))}
+            <FieldRows
+              fields={typeDef.fields}
+              value={editing.values}
+              onChange={(name, v) =>
+                setEditing((cur) => (cur ? { ...cur, values: { ...cur.values, [name]: v } } : cur))
+              }
+            />
           </div>
         )}
       </Modal>
