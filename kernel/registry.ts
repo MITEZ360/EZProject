@@ -45,6 +45,8 @@ export const Tokens = {
   Content: 'content',
   Authz: 'authz',
   Search: 'search',
+  Audit: 'audit',
+  Settings: 'settings',
 } as const;
 
 export type Token = (typeof Tokens)[keyof typeof Tokens];
