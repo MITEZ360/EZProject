@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **管理端归位**：`scenarios/blog/admin` → `scenarios/generic-cms/admin`（通用 CMS 管理端）；内容视图按类型定义动态渲染（零写死字段），App 壳零业务词汇；博客场景复用通用 admin、仅保留类型种子
+
 ### Added
 - **决策 #26 第三步落地**：后台"类型管理"视图——类型列表/新建/编辑（字段动态增删 + 11 种调色板下拉），消费 `/api/manage/v1/types`；类型定义复用内核原语
 - **决策 #26 第二步落地**：`defineType` 落库（逻辑 Schema：类型定义是数据，更新不迁移旧数据）+ `listTypes`/`getType` 契约 + 类型管理 API（`POST/GET /api/manage/v1/types`）+ 跨重启持久化验证

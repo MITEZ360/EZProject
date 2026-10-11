@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
-  root: 'scenarios/blog/admin',
+  root: 'scenarios/generic-cms/admin',
   plugins: [react()],
   resolve: {
     alias: {
