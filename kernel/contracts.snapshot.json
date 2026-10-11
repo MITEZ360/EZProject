@@ -2,7 +2,7 @@
   "kernel/contracts/asset.contract.ts": [
     "export interface Asset {",
     "export interface AssetStore {",
-    "export type AssetDialect = 'local' | 's3';"
+    "export type AssetProviderKind = 'local' | 's3';"
   ],
   "kernel/contracts/audit.contract.ts": [
     "export interface AuditEntry {",
