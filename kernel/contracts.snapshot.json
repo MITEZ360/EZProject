@@ -16,6 +16,13 @@
     "export interface ContentUpdateInput {",
     "export interface ContentService {"
   ],
+  "kernel/contracts/identity.contract.ts": [
+    "export interface User {",
+    "export interface TokenPair {",
+    "export interface AuthzPermission {",
+    "export interface Role {",
+    "export interface IdentityService {"
+  ],
   "kernel/contracts/module.contract.ts": [
     "export interface ModuleContext {",
     "export interface PlatformModule {"

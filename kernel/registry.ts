@@ -44,6 +44,7 @@ export const Tokens = {
   Storage: 'storage',
   Content: 'content',
   Authz: 'authz',
+  Identity: 'identity',
   Search: 'search',
   Audit: 'audit',
   Settings: 'settings',
