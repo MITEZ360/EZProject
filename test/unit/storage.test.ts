@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Dialect, StorageDriver } from '@kernel/contracts/storage.contract.js';
 import {
   createStorageDriver,
@@ -256,6 +259,32 @@ describe('策略工厂', () => {
       expect(() => createStorageDriver({ dialect: 'postgres' })).toThrow(/连接串/);
     } finally {
       if (saved !== undefined) process.env['DATABASE_URL'] = saved;
+    }
+  });
+});
+
+describe('SQLite：文件目录自动创建（对齐"解压即用"定位）', () => {
+  it('父目录不存在时驱动自建，而不是抛英文原生错误', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cms-sqlite-dir-'));
+    const file = join(root, 'nested', 'deep', 'app.db');
+    try {
+      const d = createStorageDriver({ dialect: 'sqlite', url: file });
+      await d.migrate();
+      // 真实写入一次：证明库确实可用（不只是文件被创建出来）
+      await d.transaction(async (tx) => {
+        await tx.insert('content_types', {
+          id: 'dir-check',
+          tenantId: 't1',
+          slug: 'x',
+          schema: { slug: 'x', fields: [] },
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      });
+      await d.close();
+      expect(existsSync(file)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

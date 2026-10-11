@@ -4,6 +4,8 @@
 // 必须遵守 storage.contract.ts 头部的"事务语义"（含可重入）。
 
 import Database from 'better-sqlite3';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type {
   QuerySpec,
   StorageDriver,
@@ -88,8 +90,14 @@ function wrapError(table: string, e: unknown): unknown {
 
 export function createSqliteDriver(config: SqliteConfig): StorageDriver {
   const registry = createSchemaRegistry();
-  const db = new Database(config.file);
   const isMemory = config.file === ':memory:';
+  if (!isMemory) {
+    // 父目录不存在时 better-sqlite3 抛的是英文原生错误
+    // （"Cannot open database because the directory does not exist"）。
+    // 对"解压即用"的定位来说，让使用者先手动 mkdir 不合理——驱动自己建。
+    mkdirSync(dirname(config.file), { recursive: true });
+  }
+  const db = new Database(config.file);
   if (!isMemory) db.pragma('journal_mode = WAL'); // WAL 对内存库无效，跳过（避免误导性配置）
   db.pragma('busy_timeout = 5000');
   db.pragma('foreign_keys = ON');
