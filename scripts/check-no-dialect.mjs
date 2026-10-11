@@ -12,7 +12,10 @@ const ALLOW = [
   join('modules', 'storage', 'registry.ts'),
 ];
 
-const DIALECT_RE = /(dialect\s*===|dialect\s*==|===\s*'sqlite'|===\s*'postgres'|===\s*'mysql')/;
+// 覆盖 === / !== —— 原实现只匹配 ===，"方言不等"同样是方言分支却逃过了检测
+// （modules/media 的 `dialect !== 'local'` 就曾长期漏网，CI 接入后被发现）。
+const DIALECT_RE =
+  /(dialect\s*(===|==|!==|!=)|(===|!==)\s*'(sqlite|postgres|mysql)')/;
 
 function collect(dir) {
   const out = [];

@@ -34,7 +34,7 @@ async function bootApp(mediaRoot: string): Promise<{ app: App; api: HttpApp; tok
   const app = await bootstrap({
     modules: [
       storageModule({ dialect: 'sqlite', url: ':memory:' }),
-      cacheModule({ dialect: 'memory' }),
+      cacheModule({ provider: 'memory' }),
       authzModule({ jwtSecret: 'test-secret' }),
       contentModule([posts]),
       mediaModule({ root: mediaRoot }),
@@ -161,7 +161,7 @@ describe('读缓存（memory 策略）', () => {
   });
 
   it('CacheProvider：TTL 过期与按前缀失效', async () => {
-    const app = await bootstrap({ modules: [cacheModule({ dialect: 'memory' })] });
+    const app = await bootstrap({ modules: [cacheModule({ provider: 'memory' })] });
     const cache = app.registry.require<CacheProvider>(Tokens.Cache);
 
     await cache.set('a:1', { v: 1 }, 1);
@@ -180,7 +180,7 @@ describe('读缓存（memory 策略）', () => {
   });
 
   it('cache=none 时行为透明（不缓存）', async () => {
-    const app = await bootstrap({ modules: [cacheModule({ dialect: 'none' })] });
+    const app = await bootstrap({ modules: [cacheModule({ provider: 'none' })] });
     const cache = app.registry.require<CacheProvider>(Tokens.Cache);
     await cache.set('k', 1);
     expect(await cache.get('k')).toBeNull();

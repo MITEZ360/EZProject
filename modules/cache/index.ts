@@ -123,24 +123,32 @@ export function createNullCache(): CacheProvider {
 }
 
 export interface CacheModuleOptions extends MemoryCacheOptions {
-  /** 'memory' | 'none' | 'redis'（redis 待补） */
-  dialect?: 'memory' | 'none' | 'redis';
+  /**
+   * 策略提供方：'memory'（默认）| 'none' | 'redis'（待补）。
+   * 刻意**不叫 dialect**——"方言"在本项目专指数据库方言（`storage.Dialect`）；
+   * 缓存策略用 provider 区分，避免术语混淆。
+   */
+  provider?: 'memory' | 'none' | 'redis';
 }
+
+/** 缓存策略表（唯一选择点）：新增策略只加表项，不改逻辑 */
+const CACHE_STRATEGIES: Record<
+  NonNullable<CacheModuleOptions['provider']>,
+  (o: CacheModuleOptions) => CacheProvider
+> = {
+  memory: (o) => createMemoryCache({ maxEntries: o.maxEntries, maxBytes: o.maxBytes }),
+  none: () => createNullCache(),
+  redis: () => {
+    throw new Error('[cache] redis 策略未实现（阶段三按需补）。契约已就绪。');
+  },
+};
 
 export function cacheModule(options: CacheModuleOptions = {}): PlatformModule {
   return {
     name: 'cache',
     async setup({ registry }): Promise<void> {
-      const dialect = options.dialect ?? 'memory';
-      if (dialect === 'redis') {
-        throw new Error('[cache] redis 策略未实现（阶段三按需补）。契约已就绪。');
-      }
-      registry.provide<CacheProvider>(
-        Tokens.Cache,
-        dialect === 'none'
-          ? createNullCache()
-          : createMemoryCache({ maxEntries: options.maxEntries, maxBytes: options.maxBytes })
-      );
+      const provider = options.provider ?? 'memory';
+      registry.provide<CacheProvider>(Tokens.Cache, CACHE_STRATEGIES[provider](options));
     },
   };
 }
