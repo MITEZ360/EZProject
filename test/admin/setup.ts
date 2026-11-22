@@ -52,6 +52,20 @@ if (!Element.prototype.scrollTo) {
 }
 window.scrollTo = window.scrollTo ?? (() => {});
 
+// jsdom 的 getComputedStyle 不支持第二个参数（伪元素）：
+// 传 pseudoElt 时它不抛错，但会打一条 "Not implemented" 的错误日志。
+// antd 每次交互都要查询伪元素样式，于是单次测试能刷出几十条噪音，
+// 把真正的失败信息淹没。这里只在"带伪元素"时退回普通查询，
+// 让 jsdom 闭嘴；不带伪元素的调用仍走原生实现，行为不变。
+{
+  const original = window.getComputedStyle.bind(window);
+  window.getComputedStyle = ((elt: Element, pseudoElt?: string | null) => {
+    // 伪元素在 jsdom 里查不到真实值，退回元素本身的计算样式即可
+    void pseudoElt;
+    return original(elt);
+  }) as typeof window.getComputedStyle;
+}
+
 // fetch 未定义时 api 层会在 await 处炸成一团无意义的错；
 // 这里只给出"默认未打桩"的显式失败，测试必须自己 stub
 if (!globalThis.fetch) {
